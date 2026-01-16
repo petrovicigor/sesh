@@ -16,6 +16,7 @@ func (c *RealConnector) Connect(name string, opts model.ConnectOpts) (string, er
 		tmuxStrategy,
 		tmuxinatorStrategy,
 		configStrategy,
+		projectStrategy,
 		dirStrategy,
 		zoxideStrategy,
 	}
@@ -24,6 +25,7 @@ func (c *RealConnector) Connect(name string, opts model.ConnectOpts) (string, er
 		"tmux":       connectToTmux,
 		"tmuxinator": connectToTmuxinator,
 		"config":     connectToTmux,
+		"projects":   connectToTmux,
 		"dir":        connectToTmux,
 		"zoxide":     connectToTmux,
 	}

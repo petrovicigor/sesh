@@ -10,6 +10,8 @@ type (
 		SortOrder            []string             `toml:"sort_order"`
 		WindowConfigs        []WindowConfig       `toml:"window"`
 		DirLength            int                  `toml:"dir_length"`
+		ProjectsConfig       ProjectsConfig       `toml:"projects"`
+		ZoxideConfig         ZoxideConfig         `toml:"zoxide"`
 	}
 	Evaluation struct {
 		StrictMode bool `toml:"strict_mode"`
@@ -36,5 +38,21 @@ type (
 		Name          string `toml:"name"`
 		StartupScript string `toml:"startup_script"`
 		Path          string `toml:"path"`
+	}
+
+	ProjectsConfig struct {
+		Paths            []string       `toml:"paths"`
+		MaxDepth         int            `toml:"max_depth"`
+		IncludeWorktrees bool           `toml:"include_worktrees"`
+		Exclude          []string       `toml:"exclude"`
+		Saved            []SavedProject `toml:"saved"`
+	}
+
+	SavedProject struct {
+		Path string `toml:"path"`
+	}
+
+	ZoxideConfig struct {
+		Exclude []string `toml:"exclude"`
 	}
 )

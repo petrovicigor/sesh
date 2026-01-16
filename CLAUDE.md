@@ -28,6 +28,7 @@ Sesh is a smart terminal session manager written in Go that helps users create a
 2. **Zoxide**: Frequently used directories
 3. **Config**: User-defined sessions in configuration
 4. **Tmuxinator**: Tmuxinator project configurations
+5. **Projects**: Directory scanning from configured project paths (e.g., `~/Projects`)
 
 ## Common Development Commands
 
@@ -56,6 +57,173 @@ go test -run TestFunctionName ./package/...
 mockery --all
 ```
 
+## Projects Source - Implementation Details
+
+### Overview
+
+The **Projects** source scans configured directory paths (e.g., `~/Projects`) and exposes all subdirectories as available sessions. It includes automatic git worktree detection and uses sesh's native custom naming pattern (separate display name and filesystem path).
+
+### Architecture Pattern: Name/Path Separation
+
+Projects source follows the same pattern as Config sessions:
+
+```go
+// Display name vs. Filesystem path
+model.SeshSession{
+    Src:  "projects",
+    Name: "chase-cognito",           // Short display name (shown in list)
+    Path: "/Users/user/Projects/chase-cognito", // Full path (used for connection)
+}
+```
+
+**Benefits:**
+- Clean, short names in the UI
+- Full paths preserved for connection
+- No hardcoded path construction in shell scripts
+- Consistent with existing sesh patterns
+
+### Key Files
+
+#### Core Implementation
+
+**`lister/projects.go`** - Main projects source logic
+- `listProjects()`: Scans configured paths, detects worktrees, builds sessions
+- `scanDirectoryFast()`: Optimized directory scanning (depth=1 fast path)
+- `detectWorktreesFast()`: Parallel git worktree detection with 10s cache
+- `getProjectDisplayName()`: Generates short names (worktrees: `repo/branch`, regular: `basename`)
+- `FindProjectSession()`: Lookup method for path resolution
+
+**`connector/projects.go`** - Connection strategy
+- `projectStrategy()`: Resolves project names to paths for connection
+
+**`seshcli/path.go`** - Path resolution command
+- `NewPathCommand()`: CLI command that resolves session names to filesystem paths
+- Tries all sources in order: projects → config → tmux → zoxide → tmuxinator
+
+#### Configuration
+
+**`model/config.go`** - Configuration data structures
+```go
+type ProjectsConfig struct {
+    Paths            []string       // e.g., ["~/Projects"]
+    MaxDepth         int            // Scan depth (default: 1)
+    IncludeWorktrees bool           // Auto-detect git worktrees
+    Exclude          []string       // Patterns to exclude
+    Saved            []SavedProject // Additional paths to include
+}
+```
+
+**Example `sesh.toml`:**
+```toml
+[projects]
+paths = ["~/Projects"]
+max_depth = 1
+include_worktrees = true
+exclude = ["node_modules", ".git", "vendor", "build", "dist"]
+```
+
+#### Integration Points
+
+**`lister/lister.go`** - Interface definition
+- Added `FindProjectSession(name string) (model.SeshSession, bool)` to Lister interface
+
+**`connector/connect.go`** - Connection strategy order
+- Projects checked after config, before dir/zoxide strategies
+
+**`icon/icon.go`** - Visual differentiation
+- Projects use green folder icon (color code 32) vs. cyan for zoxide (36)
+
+### Display Name Logic
+
+**Regular projects**: Just the basename
+```
+/Users/user/Projects/chase-cognito → "chase-cognito"
+```
+
+**Git worktrees**: `parent/name` format (detected via `.git` being a file, not directory)
+```
+/Users/user/Projects/geoip/develop → "geoip/develop"
+```
+
+**Edge case**: Worktrees directly under project root show as `Projects/name` (acceptable trade-off for simplicity)
+
+### The `sesh path` Command
+
+**Purpose**: Resolves session display names to filesystem paths for shell scripts
+
+**Usage:**
+```bash
+$ sesh path "chase-cognito"
+/Users/user/Projects/chase-cognito
+
+$ sesh path "geoip/develop"
+/Users/user/Projects/geoip/develop
+```
+
+**Lookup order**: projects → config → tmux → zoxide → tmuxinator
+
+### Shell Script Integration
+
+Both `~/.config/sesh/connect-wrapper.sh` and `~/.config/sesh/preview.sh` follow this pattern:
+
+```bash
+# 1. Strip ANSI codes and icon characters
+session_name=$(echo "$session" | sed $'s/\033\[[0-9;]*m//g' | tr -cd '[:alnum:][:space:]/_-' | xargs | sed 's/ /\//g')
+
+# 2. Resolve to filesystem path using sesh path
+expanded_path=$(sesh path "$session_name" 2>/dev/null)
+
+# 3. Fallback to regex extraction if sesh path fails
+if [ -z "$expanded_path" ]; then
+    # Extract from display string or tmux session
+fi
+
+# 4. Use path for command decision or preview generation
+```
+
+**Why this works:**
+- Fast: Single subprocess call to `sesh path`
+- Reliable: Uses sesh's internal session lookup logic
+- No hardcoding: Works with any configured project paths
+- Maintainable: Changes to path logic only need to happen in Go code
+
+### Performance Optimizations
+
+**Worktree cache**: 10-second TTL in-memory cache for git worktree results
+- First call: ~655ms (with git commands)
+- Cached calls: ~146ms (cache hit)
+
+**Parallel execution**: Worktree detection uses goroutines with semaphore (max 4 concurrent git commands)
+
+**Fast path for depth=1**: Most common case (single level deep) uses optimized `os.ReadDir` without recursion
+
+### Adding New Source Types
+
+To add a new source following this pattern:
+
+1. **Create `lister/newsource.go`**:
+   ```go
+   func listNewSource(l *RealLister) (model.SeshSessions, error) {
+       // Build sessions with Name (display) and Path (filesystem)
+   }
+
+   func (l *RealLister) FindNewSourceSession(name string) (model.SeshSession, bool) {
+       // Lookup logic for path resolution
+   }
+   ```
+
+2. **Update `lister/lister.go`**: Add `FindNewSourceSession` to interface
+
+3. **Create `connector/newsource.go`**: Add connection strategy
+
+4. **Update `connector/connect.go`**: Add to strategies list
+
+5. **Update `seshcli/path.go`**: Add to lookup order in `NewPathCommand()`
+
+6. **Update `icon/icon.go`**: Add unique color code for visual differentiation
+
+7. **Update `model/config.go`**: Add configuration struct if needed
+
 ## Development Notes
 
 - The project uses dependency injection with interfaces for testability
@@ -63,3 +231,5 @@ mockery --all
 - Configuration is stored in TOML format (`sesh.toml`)
 - The TUI feature is currently under active development on the `tui` branch
 - When editing code, follow existing patterns for error handling, logging, and interface design
+- **Name/Path separation**: Sources that show shortened names must implement a `Find*Session()` method for path resolution
+- **Shell integration**: External scripts should use `sesh path` command rather than parsing display strings or hardcoding paths

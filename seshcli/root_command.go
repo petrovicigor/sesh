@@ -68,7 +68,7 @@ func NewRootCommand(version string) *cobra.Command {
 
 	// core dependencies
 	ls := ls.NewLs(config, shell)
-	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator)
+	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator, git)
 	startup := startup.NewStartup(config, lister, tmux, home, replacer)
 	namer := namer.NewNamer(path, git, home, config)
 	connector := connector.NewConnector(config, dir, home, lister, namer, startup, tmux, zoxide, tmuxinator)
@@ -91,6 +91,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewCloneCommand(cloner),
 		NewRootSessionCommand(lister, namer),
 		NewPreviewCommand(previewer),
+		NewPathCommand(lister),
 	)
 
 	return rootCmd

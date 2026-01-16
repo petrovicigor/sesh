@@ -1,6 +1,7 @@
 package lister
 
 import (
+	"github.com/joshmedeski/sesh/v2/git"
 	"github.com/joshmedeski/sesh/v2/home"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/tmux"
@@ -16,6 +17,7 @@ type Lister interface {
 	FindConfigSession(name string) (model.SeshSession, bool)
 	FindZoxideSession(name string) (model.SeshSession, bool)
 	FindTmuxinatorConfig(name string) (model.SeshSession, bool)
+	FindProjectSession(name string) (model.SeshSession, bool)
 }
 
 type RealLister struct {
@@ -24,8 +26,9 @@ type RealLister struct {
 	tmux       tmux.Tmux
 	zoxide     zoxide.Zoxide
 	tmuxinator tmuxinator.Tmuxinator
+	git        git.Git
 }
 
-func NewLister(config model.Config, home home.Home, tmux tmux.Tmux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator) Lister {
-	return &RealLister{config, home, tmux, zoxide, tmuxinator}
+func NewLister(config model.Config, home home.Home, tmux tmux.Tmux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator, git git.Git) Lister {
+	return &RealLister{config, home, tmux, zoxide, tmuxinator, git}
 }
