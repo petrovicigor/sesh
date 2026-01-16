@@ -124,6 +124,9 @@ func listProjects(l *RealLister) (model.SeshSessions, error) {
 		}
 	}
 
+	// Sort by recency - recently used sessions first
+	sortProjectsByRecency(orderedIndex, directory, l.recent)
+
 	result := model.SeshSessions{
 		Directory:    directory,
 		OrderedIndex: orderedIndex,
@@ -213,22 +216,35 @@ func shouldExclude(name string, patterns []string) bool {
 }
 
 // getProjectDisplayName returns a short display name for a project path
-// For worktrees: "repo/branch" (e.g., "geoip/develop")
-// For regular projects: just the basename (e.g., "chase-cognito")
+// Returns the relative path from the project root
+// Examples:
+//   - /Users/user/Projects/geoip/feature/cdk -> "geoip/feature/cdk"
+//   - /Users/user/Projects/chase-cognito -> "chase-cognito"
+//   - /Users/user/Projects/geoip/develop -> "geoip/develop"
 func getProjectDisplayName(fullPath string, projectRoots []string) string {
-	// Check if this is a worktree by looking for .git file (not directory)
-	gitPath := filepath.Join(fullPath, ".git")
-	if info, err := os.Stat(gitPath); err == nil && !info.IsDir() {
-		// This is a worktree - construct "repo/branch" name
-		// The parent of the worktree path is usually the repo name
-		parts := strings.Split(fullPath, string(filepath.Separator))
-		if len(parts) >= 2 {
-			// Get last two parts for "repo/branch" format
-			return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	// Find which project root this path belongs to
+	for _, rootPath := range projectRoots {
+		// Expand home directory
+		expandedRoot := rootPath
+		if strings.HasPrefix(rootPath, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				continue
+			}
+			expandedRoot = filepath.Join(homeDir, rootPath[2:])
+		}
+
+		// Check if fullPath is under this root
+		if strings.HasPrefix(fullPath, expandedRoot+string(filepath.Separator)) {
+			// Return relative path from root
+			relPath, err := filepath.Rel(expandedRoot, fullPath)
+			if err == nil {
+				return relPath
+			}
 		}
 	}
 
-	// For regular projects, return basename
+	// Fallback to basename if no matching root found
 	return filepath.Base(fullPath)
 }
 
@@ -305,7 +321,11 @@ func detectWorktreesFast(gitCmd interface{ WorktreeList(string) (bool, string, e
 						worktreePath := parts[0]
 						// Skip the bare repo itself
 						if worktreePath != fullPath {
-							worktrees = append(worktrees, worktreePath)
+							// Only include worktrees nested under the repo (Type 2 layout)
+							// This filters out flat worktrees like ~/Projects/repo-branch
+							if strings.HasPrefix(worktreePath, fullPath+string(filepath.Separator)) {
+								worktrees = append(worktrees, worktreePath)
+							}
 						}
 					}
 				}
@@ -340,4 +360,59 @@ func (l *RealLister) FindProjectSession(name string) (model.SeshSession, bool) {
 		return session, true
 	}
 	return model.SeshSession{}, false
+}
+
+// sortProjectsByRecency sorts the ordered index by recency
+// Recently used sessions appear first, followed by others in original order
+func sortProjectsByRecency(orderedIndex []string, directory model.SeshSessionMap, recentTracker interface{ GetAll() map[string]time.Time }) {
+	if recentTracker == nil {
+		return
+	}
+
+	recentSessions := recentTracker.GetAll()
+	if len(recentSessions) == 0 {
+		return
+	}
+
+	// Separate into recent and non-recent
+	type sessionWithTime struct {
+		key       string
+		timestamp time.Time
+		hasTime   bool
+	}
+
+	sessions := make([]sessionWithTime, len(orderedIndex))
+	for i, key := range orderedIndex {
+		session := directory[key]
+		if ts, exists := recentSessions[session.Name]; exists {
+			sessions[i] = sessionWithTime{key, ts, true}
+		} else {
+			sessions[i] = sessionWithTime{key, time.Time{}, false}
+		}
+	}
+
+	// Sort: recent sessions first (by timestamp desc), then non-recent in original order
+	for i := 0; i < len(sessions)-1; i++ {
+		for j := i + 1; j < len(sessions); j++ {
+			shouldSwap := false
+
+			if sessions[i].hasTime && sessions[j].hasTime {
+				// Both have timestamps - sort by timestamp (most recent first)
+				shouldSwap = sessions[i].timestamp.Before(sessions[j].timestamp)
+			} else if !sessions[i].hasTime && sessions[j].hasTime {
+				// j has timestamp, i doesn't - j should come first
+				shouldSwap = true
+			}
+			// If i has timestamp and j doesn't, or neither have timestamps, keep original order
+
+			if shouldSwap {
+				sessions[i], sessions[j] = sessions[j], sessions[i]
+			}
+		}
+	}
+
+	// Update orderedIndex with sorted keys
+	for i, session := range sessions {
+		orderedIndex[i] = session.key
+	}
 }

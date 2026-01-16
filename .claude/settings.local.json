@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go env:*)",
+      "Bash(go build:*)",
+      "Bash(time sesh list:*)",
+      "Bash(make build:*)",
+      "Bash(~/.config/sesh/preview.sh:*)",
+      "Bash(session=\"sesh\")",
+      "Bash(__NEW_LINE_29d327529fb0fad7__ echo \"1. tmux check \\(should succeed\\):\")",
+      "Bash(time tmux display-message:*)",
+      "Bash(__NEW_LINE_29d327529fb0fad7__ echo \"\")",
+      "Bash(tmux list-sessions:*)",
+      "Bash(time sesh:*)",
+      "Bash(for i in {1..5})",
+      "Bash(do time sesh list:*)",
+      "Bash(done)"
+    ]
+  }
+}

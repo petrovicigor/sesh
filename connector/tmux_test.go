@@ -36,6 +36,7 @@ func TestEstablishTmuxConnection(t *testing.T) {
 		mockTmux,
 		mockZoxide,
 		mockTmuxinator,
+		nil, // recent
 	}
 	mockTmux.On("AttachSession", mock.Anything).Return("attaching", nil)
 	mockZoxide.On("Add", mock.Anything).Return(nil)

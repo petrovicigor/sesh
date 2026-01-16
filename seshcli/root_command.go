@@ -22,6 +22,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/oswrap"
 	"github.com/joshmedeski/sesh/v2/pathwrap"
 	"github.com/joshmedeski/sesh/v2/previewer"
+	"github.com/joshmedeski/sesh/v2/recent"
 	"github.com/joshmedeski/sesh/v2/replacer"
 	"github.com/joshmedeski/sesh/v2/runtimewrap"
 	"github.com/joshmedeski/sesh/v2/shell"
@@ -66,12 +67,22 @@ func NewRootCommand(version string) *cobra.Command {
 
 	slog.Debug("seshcli/root_command.go: NewRootCommand", "version", version, "config", config)
 
+	// Get config directory for recent sessions tracking
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		// Fallback to ~/.config
+		homeDir, _ := os.UserHomeDir()
+		userConfigDir = path.Join(homeDir, ".config")
+	}
+	configDir := path.Join(userConfigDir, "sesh")
+
 	// core dependencies
+	recentTracker := recent.NewRecent(configDir)
 	ls := ls.NewLs(config, shell)
-	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator, git)
+	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator, git, recentTracker)
 	startup := startup.NewStartup(config, lister, tmux, home, replacer)
 	namer := namer.NewNamer(path, git, home, config)
-	connector := connector.NewConnector(config, dir, home, lister, namer, startup, tmux, zoxide, tmuxinator)
+	connector := connector.NewConnector(config, dir, home, lister, namer, startup, tmux, zoxide, tmuxinator, recentTracker)
 	icon := icon.NewIcon(config)
 	previewer := previewer.NewPreviewer(lister, tmux, icon, dir, home, ls, config, shell)
 	cloner := cloner.NewCloner(connector, git)
@@ -91,7 +102,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewCloneCommand(cloner),
 		NewRootSessionCommand(lister, namer),
 		NewPreviewCommand(previewer),
-		NewPathCommand(lister),
+		NewPathCommand(icon, lister),
 	)
 
 	return rootCmd

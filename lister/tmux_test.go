@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joshmedeski/sesh/v2/git"
 	"github.com/joshmedeski/sesh/v2/home"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/tmux"
@@ -77,7 +78,8 @@ func TestListTmuxSessions(t *testing.T) {
 		mockHome := new(home.MockHome)
 		mockZoxide := new(zoxide.MockZoxide)
 		mockTmuxinator := new(tmuxinator.MockTmuxinator)
-		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator)
+		mockGit := new(git.MockGit)
+		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
 
 		realLister, ok := lister.(*RealLister)
 		if !ok {
@@ -101,7 +103,8 @@ func TestListTmuxSessionsError(t *testing.T) {
 		mockHome := new(home.MockHome)
 		mockZoxide := new(zoxide.MockZoxide)
 		mockTmuxinator := new(tmuxinator.MockTmuxinator)
-		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator)
+		mockGit := new(git.MockGit)
+		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
 
 		realLister, ok := lister.(*RealLister)
 		if !ok {

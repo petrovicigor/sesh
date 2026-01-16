@@ -3,11 +3,12 @@ package seshcli
 import (
 	"fmt"
 
+	"github.com/joshmedeski/sesh/v2/icon"
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/spf13/cobra"
 )
 
-func NewPathCommand(list lister.Lister) *cobra.Command {
+func NewPathCommand(i icon.Icon, list lister.Lister) *cobra.Command {
 	return &cobra.Command{
 		Use:   "path <name>",
 		Short: "Get the filesystem path for a session name",
@@ -15,6 +16,9 @@ func NewPathCommand(list lister.Lister) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+
+			// Strip icons if present (handles formats like " geoip ⎇ feature/cdk")
+			name = i.RemoveIcon(name)
 
 			// Try to find the session in various sources (same order as connector)
 			// Projects

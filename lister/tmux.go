@@ -62,6 +62,11 @@ func (l *RealLister) GetLastTmuxSession() (model.SeshSession, bool) {
 	return sessions.Directory[secondSessionIndex], true
 }
 
+func (l *RealLister) ListTmuxSessions() model.SeshSessions {
+	sessions, _ := listTmux(l)
+	return sessions
+}
+
 func (l *RealLister) GetAttachedTmuxSession() (model.SeshSession, bool) {
 	return GetAttachedTmuxSession(l)
 }

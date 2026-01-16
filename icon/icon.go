@@ -36,14 +36,22 @@ func (i *RealIcon) AddIcon(s model.SeshSession) string {
 	var icon string
 	var colorCode int
 
-	// Check if this is a worktree session (tmux session with "/" in name, not absolute path)
-	isWorktree := s.Src == "tmux" && strings.Contains(s.Name, "/") && !strings.HasPrefix(s.Name, "/") && !strings.HasPrefix(s.Name, "~")
+	// Check if this is a worktree session (name with "/" in it)
+	// Works for both active tmux sessions and inactive projects
+	// Type 2 worktrees always have "repo/branch" format (never start with "/" or "~")
+	isWorktree := (s.Src == "tmux" || s.Src == "projects") && strings.Contains(s.Name, "/")
 
 	if isWorktree {
-		// For worktrees, use tmux icon + insert worktree separator between repo and branch
-		// e.g., "geoip/develop" becomes " geoip ⎇ develop"
-		icon = tmuxIcon
-		colorCode = 34 // blue
+		// For worktrees, insert worktree separator between repo and branch
+		// e.g., "geoip/develop" becomes " geoip ⎇ develop" (tmux) or " geoip ⎇ develop" (projects)
+		switch s.Src {
+		case "tmux":
+			icon = tmuxIcon
+			colorCode = 34 // blue
+		case "projects":
+			icon = zoxideIcon // folder icon
+			colorCode = 32    // green
+		}
 		parts := strings.SplitN(s.Name, "/", 2)
 		if len(parts) == 2 {
 			return fmt.Sprintf("%s %s %s %s", ansiString(colorCode, icon), parts[0], worktreeIcon, parts[1])
@@ -75,12 +83,12 @@ func (i *RealIcon) AddIcon(s model.SeshSession) string {
 }
 
 func (i *RealIcon) RemoveIcon(name string) string {
-	// Check if this is a worktree format: " geoip ⎇ develop"
+	// Check if this is a worktree format: " geoip ⎇ develop" or " geoip ⎇ develop"
 	if strings.Contains(name, worktreeIcon) {
 		// Strip icon prefix first
 		stripped := name
-		if strings.HasPrefix(name, tmuxIcon) {
-			// Remove icon + space: assumes tmuxIcon is 3 bytes (UTF-8 ) + 1 space = 4 bytes total
+		if strings.HasPrefix(name, tmuxIcon) || strings.HasPrefix(name, zoxideIcon) {
+			// Remove icon + space: assumes icon is 3 bytes (UTF-8  or ) + 1 space = 4 bytes total
 			stripped = name[4:]
 		}
 		// Remove worktree separator and rejoin with "/"

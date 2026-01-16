@@ -4,6 +4,7 @@ import (
 	"log"
 	"testing"
 
+	"github.com/joshmedeski/sesh/v2/git"
 	"github.com/joshmedeski/sesh/v2/home"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/tmux"
@@ -18,6 +19,7 @@ func TestListConfigSessions(t *testing.T) {
 	mockZoxide := new(zoxide.MockZoxide)
 	mockTmux := new(tmux.MockTmux)
 	mockTmuxinator := new(tmuxinator.MockTmuxinator)
+	mockGit := new(git.MockGit)
 	config := model.Config{
 		SessionConfigs: []model.SessionConfig{
 			{
@@ -26,7 +28,7 @@ func TestListConfigSessions(t *testing.T) {
 			},
 		},
 	}
-	lister := NewLister(config, mockHome, mockTmux, mockZoxide, mockTmuxinator)
+	lister := NewLister(config, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
 
 	realLister, ok := lister.(*RealLister)
 	if !ok {

@@ -39,7 +39,12 @@ func (c *RealConnector) Connect(name string, opts model.ConnectOpts) (string, er
 			if connection.AddToZoxide {
 				c.zoxide.Add(connection.Session.Path)
 			}
-			return connectStrategy[connection.Session.Src](c, connection, opts)
+			result, err := connectStrategy[connection.Session.Src](c, connection, opts)
+			if err == nil {
+				// Record session as recently used (ignore errors to not break connection)
+				_ = c.recent.RecordSession(connection.Session.Name)
+			}
+			return result, err
 		}
 	}
 

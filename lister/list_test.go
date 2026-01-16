@@ -3,6 +3,7 @@ package lister
 import (
 	"testing"
 
+	"github.com/joshmedeski/sesh/v2/git"
 	"github.com/joshmedeski/sesh/v2/home"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/tmux"
@@ -162,7 +163,8 @@ func TestHideDuplicates(t *testing.T) {
 				SessionConfigs: tt.configSessions,
 			}
 
-			lister := NewLister(config, mockHome, mockTmux, mockZoxide, mockTmuxinator)
+			mockGit := new(git.MockGit)
+			lister := NewLister(config, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
 
 			// Call the actual List function with HideDuplicates
 			result, err := lister.List(ListOptions{

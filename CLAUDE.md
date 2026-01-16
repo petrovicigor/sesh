@@ -32,11 +32,22 @@ Sesh is a smart terminal session manager written in Go that helps users create a
 
 ## Common Development Commands
 
-### Build
+### Build and Install
+
+**IMPORTANT**: After making any code changes, always build and install the binary to the user's Dotfiles bin:
+
+```bash
+# Build and install in one command (ALWAYS USE THIS)
+go build -o ./sesh && cp ./sesh /Users/igorpetrovic/Dotfiles/bin/sesh
+```
+
+The user's active `sesh` binary is located at `/Users/igorpetrovic/Dotfiles/bin/sesh` (not in `$GOPATH/bin`). You must update this location after any changes.
+
+**Standard build** (for testing only, does not update the active binary):
 ```bash
 make build
 # Or directly:
-go build -ldflags "-X 'main.version=`git describe --tags --abbrev=0`'" -o $GOPATH/bin/sesh
+go build -o ./sesh
 ```
 
 ### Test

@@ -4,6 +4,7 @@ import (
 	"log"
 	"testing"
 
+	"github.com/joshmedeski/sesh/v2/git"
 	"github.com/joshmedeski/sesh/v2/home"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/tmux"
@@ -31,8 +32,9 @@ func TestListZoxideSessions(t *testing.T) {
 				Path:  "/Users/joshmedeski/.config/fish",
 			},
 		}, nil)
+		mockGit := new(git.MockGit)
 
-		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator)
+		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
 
 		realLister, ok := lister.(*RealLister)
 		if !ok {
