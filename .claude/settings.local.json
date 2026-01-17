@@ -14,7 +14,16 @@
       "Bash(time sesh:*)",
       "Bash(for i in {1..5})",
       "Bash(do time sesh list:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "mcp__context7__resolve-library-id",
+      "WebFetch(domain:deepwiki.com)",
+      "mcp__context7__query-docs",
+      "WebFetch(domain:leg100.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:charm.land)",
+      "WebFetch(domain:eblog.fly.dev)",
+      "Bash(go get:*)",
+      "Bash(time ./sesh list:*)"
     ]
   }
 }
