@@ -2,6 +2,8 @@ package icon
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joshmedeski/sesh/v2/model"
@@ -32,14 +34,31 @@ func ansiString(code int, s string) string {
 	return fmt.Sprintf("\033[%dm%s\033[39m", code, s)
 }
 
+// isGitWorktree checks if a path is a git worktree by checking if .git is a file (not a directory)
+func isGitWorktree(path string) bool {
+	if path == "" {
+		return false
+	}
+	gitPath := filepath.Join(path, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return false
+	}
+	// In worktrees, .git is a file, not a directory
+	return !info.IsDir()
+}
+
 func (i *RealIcon) AddIcon(s model.SeshSession) string {
 	var icon string
 	var colorCode int
 
-	// Check if this is a worktree session (name with "/" in it)
-	// Works for both active tmux sessions and inactive projects
-	// Type 2 worktrees always have "repo/branch" format (never start with "/" or "~")
-	isWorktree := (s.Src == "tmux" || s.Src == "projects") && strings.Contains(s.Name, "/")
+	// Check if this is a worktree session by:
+	// 1. Name has "/" format (repo/branch)
+	// 2. Path is actually a git worktree (.git is a file, not directory)
+	// This distinguishes real worktrees from disambiguated names like "igorpetrovic/test-zoxide"
+	isWorktree := (s.Src == "tmux" || s.Src == "projects") &&
+		strings.Contains(s.Name, "/") &&
+		isGitWorktree(s.Path)
 
 	if isWorktree {
 		// For worktrees, insert worktree separator between repo and branch

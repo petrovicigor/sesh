@@ -26,6 +26,7 @@ func NewListCommand(icon icon.Icon, json json.Json, list lister.Lister) *cobra.C
 			tmuxinator, _ := cmd.Flags().GetBool("tmuxinator")
 			projects, _ := cmd.Flags().GetBool("projects")
 			hideDuplicates, _ := cmd.Flags().GetBool("hide-duplicates")
+			withPath, _ := cmd.Flags().GetBool("with-path")
 
 			sessions, err := list.List(lister.ListOptions{
 				Config:         config,
@@ -52,11 +53,16 @@ func NewListCommand(icon icon.Icon, json json.Json, list lister.Lister) *cobra.C
 			}
 
 			for _, i := range sessions.OrderedIndex {
-				name := sessions.Directory[i].Name
+				session := sessions.Directory[i]
+				name := session.Name
 				if icons {
-					name = icon.AddIcon(sessions.Directory[i])
+					name = icon.AddIcon(session)
 				}
-				fmt.Println(name)
+				if withPath && session.Path != "" {
+					fmt.Printf("%s\t%s\n", name, session.Path)
+				} else {
+					fmt.Println(name)
+				}
 			}
 
 			return nil
@@ -72,6 +78,7 @@ func NewListCommand(icon icon.Icon, json json.Json, list lister.Lister) *cobra.C
 	cmd.Flags().BoolP("tmuxinator", "T", false, "show tmuxinator configs")
 	cmd.Flags().BoolP("projects", "p", false, "show project directories")
 	cmd.Flags().BoolP("hide-duplicates", "d", false, "hide duplicate entries")
+	cmd.Flags().Bool("with-path", false, "include path in output (tab-separated, for fzf --with-nth)")
 
 	return cmd
 }
