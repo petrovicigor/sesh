@@ -55,3 +55,21 @@ func NewConnector(
 		recent,
 	}
 }
+
+// disambiguateName generates a unique session name by incrementally adding parent directories
+func (c *RealConnector) disambiguateName(path string, baseName string) string {
+	dirLength := 2
+	for dirLength <= 5 { // Max 5 levels deep
+		name, err := c.namer.NameWithLength(path, dirLength)
+		if err != nil {
+			// If naming fails, continue trying with next length
+			dirLength++
+			continue
+		}
+		if _, exists := c.lister.FindTmuxSession(name); !exists {
+			return name
+		}
+		dirLength++
+	}
+	return baseName // Fallback to original name if no unique name found
+}

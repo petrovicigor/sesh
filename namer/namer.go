@@ -14,6 +14,8 @@ type Namer interface {
 	Name(path string) (string, error)
 	// Names a sesh session from the root of a given path
 	RootName(path string) (string, error)
+	// Names a sesh session from a given path with explicit directory length
+	NameWithLength(path string, dirLength int) (string, error)
 }
 
 type RealNamer struct {
@@ -78,4 +80,20 @@ func (n *RealNamer) RootName(path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("could not determine root name from path: %s", path)
+}
+
+func (n *RealNamer) NameWithLength(path string, dirLength int) (string, error) {
+	path, err := n.pathwrap.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	name, err := dirNameWithLength(n, path, dirLength)
+	if err != nil {
+		return "", err
+	}
+	if name == "" {
+		return "", fmt.Errorf("could not determine name from path: %s", path)
+	}
+	return convertToValidName(name), nil
 }

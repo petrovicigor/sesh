@@ -7,8 +7,11 @@ import (
 
 // Gets the name from a directory
 func dirName(n *RealNamer, path string) (string, error) {
-	dirLength := n.config.DirLength
+	return dirNameWithLength(n, path, n.config.DirLength)
+}
 
+// Gets the name from a directory with explicit length parameter
+func dirNameWithLength(n *RealNamer, path string, dirLength int) (string, error) {
 	if dirLength <= 1 {
 		return n.pathwrap.Base(path), nil
 	}
