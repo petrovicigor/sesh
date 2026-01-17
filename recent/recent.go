@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	maxRecentSessions = 20
+	maxRecentSessions = 50
 	recentFileName    = "recent_sessions.json"
 )
 

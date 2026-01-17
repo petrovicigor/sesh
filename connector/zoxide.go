@@ -29,5 +29,6 @@ func zoxideStrategy(c *RealConnector, path string) (model.Connection, error) {
 		Session:     session,
 		New:         true,
 		AddToZoxide: true,
+		SkipRecent:  true, // Don't track zoxide sessions - already tracked by zoxide
 	}, nil
 }
