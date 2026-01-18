@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/joshmedeski/sesh/v2/model"
@@ -15,32 +14,7 @@ func ProjectKey(name string) string {
 	return fmt.Sprintf("projects:%s", name)
 }
 
-// Simple cache for worktree results
-var (
-	worktreeCache      = make(map[string][]string)
-	worktreeCacheTime  = make(map[string]time.Time)
-	worktreeCacheMutex sync.RWMutex
-	worktreeCacheTTL   = 10 * time.Second
-)
-
-// Cache for entire project sessions list
-var (
-	projectSessionsCache     model.SeshSessions
-	projectSessionsCacheTime time.Time
-	projectSessionsMutex     sync.RWMutex
-	projectSessionsCacheTTL  = 10 * time.Second
-)
-
 func listProjects(l *RealLister) (model.SeshSessions, error) {
-	// Check cache first
-	now := time.Now()
-	projectSessionsMutex.RLock()
-	if !projectSessionsCacheTime.IsZero() && now.Sub(projectSessionsCacheTime) < projectSessionsCacheTTL {
-		cached := projectSessionsCache
-		projectSessionsMutex.RUnlock()
-		return cached, nil
-	}
-	projectSessionsMutex.RUnlock()
 
 	// If no project paths configured, return empty
 	if len(l.config.ProjectsConfig.Paths) == 0 {
@@ -127,18 +101,10 @@ func listProjects(l *RealLister) (model.SeshSessions, error) {
 	// Sort by recency - recently used sessions first
 	sortProjectsByRecency(orderedIndex, directory, l.recent)
 
-	result := model.SeshSessions{
+	return model.SeshSessions{
 		Directory:    directory,
 		OrderedIndex: orderedIndex,
-	}
-
-	// Update cache
-	projectSessionsMutex.Lock()
-	projectSessionsCache = result
-	projectSessionsCacheTime = now
-	projectSessionsMutex.Unlock()
-
-	return result, nil
+	}, nil
 }
 
 // scanDirectoryFast scans a single level deep (optimized for depth=1)
@@ -248,107 +214,52 @@ func getProjectDisplayName(fullPath string, projectRoots []string) string {
 	return filepath.Base(fullPath)
 }
 
-// detectWorktreesFast scans directories in parallel for git worktrees with caching
+// detectWorktreesFast scans directories for nested git worktrees using filesystem checks
 func detectWorktreesFast(gitCmd interface{ WorktreeList(string) (bool, string, error) }, dirs []string, excludePatterns []string) ([]string, error) {
-	// First, filter to only git repos (fast check)
-	var gitRepos []string
+	var allWorktrees []string
+
+	// For each directory, check if it's a git repo and scan for nested worktrees
 	for _, dir := range dirs {
 		gitPath := filepath.Join(dir, ".git")
-		if _, err := os.Stat(gitPath); err == nil {
-			gitRepos = append(gitRepos, dir)
+
+		// Check if .git exists
+		info, err := os.Stat(gitPath)
+		if err != nil {
+			continue // Not a git repo
 		}
-	}
 
-	// If no git repos, return early
-	if len(gitRepos) == 0 {
-		return []string{}, nil
-	}
+		// Only scan for nested worktrees if .git is a directory (main repo)
+		// If .git is a file, this directory itself is already a worktree
+		if !info.IsDir() {
+			continue
+		}
 
-	now := time.Now()
-	var allWorktrees []string
-	var uncachedRepos []string
+		// Scan one level deep inside this git repo for worktrees
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
 
-	// Check cache first
-	worktreeCacheMutex.RLock()
-	for _, repo := range gitRepos {
-		if cached, exists := worktreeCache[repo]; exists {
-			if cacheTime, ok := worktreeCacheTime[repo]; ok && now.Sub(cacheTime) < worktreeCacheTTL {
-				// Cache hit
-				allWorktrees = append(allWorktrees, cached...)
+		for _, entry := range entries {
+			if !entry.IsDir() {
 				continue
 			}
-		}
-		// Cache miss or expired
-		uncachedRepos = append(uncachedRepos, repo)
-	}
-	worktreeCacheMutex.RUnlock()
 
-	// If everything was cached, return early
-	if len(uncachedRepos) == 0 {
-		return allWorktrees, nil
-	}
-
-	// Process uncached repos in parallel (but only a few at a time)
-	worktreesChan := make(chan struct {
-		repo      string
-		worktrees []string
-	}, len(uncachedRepos))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4) // Limit to 4 concurrent git commands
-
-	for _, dir := range uncachedRepos {
-		wg.Add(1)
-		go func(fullPath string) {
-			defer wg.Done()
-			sem <- struct{}{}        // acquire semaphore
-			defer func() { <-sem }() // release semaphore
-
-			var worktrees []string
-
-			// Try to get worktree list
-			ok, output, err := gitCmd.WorktreeList(fullPath)
-			if ok && err == nil {
-				// Parse worktree list output
-				// Format: /path/to/worktree HASH [branch]
-				lines := strings.Split(strings.TrimSpace(output), "\n")
-				for _, line := range lines {
-					if line == "" {
-						continue
-					}
-					// Extract path (first field)
-					parts := strings.Fields(line)
-					if len(parts) > 0 {
-						worktreePath := parts[0]
-						// Skip the bare repo itself
-						if worktreePath != fullPath {
-							// Only include worktrees nested under the repo (Type 2 layout)
-							// This filters out flat worktrees like ~/Projects/repo-branch
-							if strings.HasPrefix(worktreePath, fullPath+string(filepath.Separator)) {
-								worktrees = append(worktrees, worktreePath)
-							}
-						}
-					}
-				}
+			name := entry.Name()
+			if shouldExclude(name, excludePatterns) {
+				continue
 			}
 
-			worktreesChan <- struct {
-				repo      string
-				worktrees []string
-			}{fullPath, worktrees}
-		}(dir)
-	}
+			subPath := filepath.Join(dir, name)
+			subGitPath := filepath.Join(subPath, ".git")
 
-	wg.Wait()
-	close(worktreesChan)
-
-	// Collect results and update cache
-	worktreeCacheMutex.Lock()
-	for result := range worktreesChan {
-		worktreeCache[result.repo] = result.worktrees
-		worktreeCacheTime[result.repo] = now
-		allWorktrees = append(allWorktrees, result.worktrees...)
+			// Check if .git exists and is a file (= worktree)
+			subInfo, err := os.Stat(subGitPath)
+			if err == nil && !subInfo.IsDir() {
+				allWorktrees = append(allWorktrees, subPath)
+			}
+		}
 	}
-	worktreeCacheMutex.Unlock()
 
 	return allWorktrees, nil
 }

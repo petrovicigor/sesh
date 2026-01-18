@@ -100,7 +100,7 @@ model.SeshSession{
 **`lister/projects.go`** - Main projects source logic
 - `listProjects()`: Scans configured paths, detects worktrees, builds sessions
 - `scanDirectoryFast()`: Optimized directory scanning (depth=1 fast path)
-- `detectWorktreesFast()`: Parallel git worktree detection with 10s cache
+- `detectWorktreesFast()`: Filesystem-based worktree detection (checks if `.git` is file vs directory)
 - `getProjectDisplayName()`: Generates short names (worktrees: `repo/branch`, regular: `basename`)
 - `FindProjectSession()`: Lookup method for path resolution
 
@@ -200,13 +200,34 @@ fi
 
 ### Performance Optimizations
 
-**Worktree cache**: 10-second TTL in-memory cache for git worktree results
-- First call: ~655ms (with git commands)
-- Cached calls: ~146ms (cache hit)
-
-**Parallel execution**: Worktree detection uses goroutines with semaphore (max 4 concurrent git commands)
+**Filesystem-only worktree detection** (~2-3ms):
+- Uses `os.Stat()` to check if `.git` is a file (worktree) vs directory (main repo)
+- No subprocess calls to `git worktree list` - pure filesystem operations
+- 50x faster than previous implementation (~129ms with git commands)
 
 **Fast path for depth=1**: Most common case (single level deep) uses optimized `os.ReadDir` without recursion
+
+### Worktree Detection Technical Details
+
+**How it works:**
+```go
+// Main git repo: .git is a directory
+info, _ := os.Stat("/path/to/repo/.git")
+info.IsDir() // true
+
+// Git worktree: .git is a file containing gitdir reference
+info, _ := os.Stat("/path/to/repo/branch/.git")
+info.IsDir() // false
+```
+
+**Edge case - Submodules:**
+- Git submodules also have `.git` as a file (not directory)
+- Current implementation treats submodules as worktrees
+- In practice, submodules are rarely nested directly under project root
+- If strict distinction needed, read `.git` file and check for `/worktrees/` string
+- This would add ~10-20µs per worktree (negligible vs 125ms savings)
+
+**Trade-off:** Simplicity and speed over 100% accuracy for rare edge case
 
 ### Adding New Source Types
 
@@ -244,3 +265,32 @@ To add a new source following this pattern:
 - When editing code, follow existing patterns for error handling, logging, and interface design
 - **Name/Path separation**: Sources that show shortened names must implement a `Find*Session()` method for path resolution
 - **Shell integration**: External scripts should use `sesh path` command rather than parsing display strings or hardcoding paths
+
+### Performance Debugging
+
+**Timing instrumentation** is built into `lister/list.go:56-58`:
+```go
+start := time.Now()
+sessions, err := srcStrategies[s](l)
+fmt.Fprintf(os.Stderr, "[TIMING] %s: %v\n", s, time.Since(start))
+```
+
+This logs each session source's load time to stderr:
+```bash
+$ sesh list 2>&1 | grep TIMING
+[TIMING] config: 18.583µs
+[TIMING] tmuxinator: 119.292µs
+[TIMING] projects: 2.17725ms
+[TIMING] tmux: 8.61225ms
+```
+
+**Use this to:**
+- Identify bottlenecks when adding new features
+- Verify performance improvements
+- Debug slow session loading
+
+**Typical timings (as of 2026-01-18):**
+- config: <50µs (fast)
+- tmuxinator: ~100µs (fast)
+- projects: ~2-3ms (filesystem only)
+- tmux: ~8-15ms (subprocess overhead)
