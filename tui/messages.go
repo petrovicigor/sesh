@@ -18,3 +18,12 @@ type SessionsLoadedMsg struct {
 type PreviewLoadedMsg struct {
 	Content string
 }
+
+type ProcessDetectedMsg struct {
+	SessionName string
+	Process     string // "node", "python", etc.
+}
+
+type DebounceTickMsg struct {
+	SessionName string
+}

@@ -29,8 +29,11 @@ type Model struct {
 	height         int
 	currentFilter  FilterType
 	keys           KeyMap
-	lastFilter     string // Track last filter text to detect changes
-	previewContent string // Current preview text
+	lastFilter     string            // Track last filter text to detect changes
+	previewContent string            // Current preview text
+	processInfo    map[string]string // session.Name -> process indicator (e.g., "node", "python")
+	pendingPreview string            // Session name waiting for debounce
+	lastPreviewKey string            // Last session name that had preview loaded
 }
 
 func newModel(
@@ -59,7 +62,8 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{}
+	processInfo := make(map[string]string)
+	delegate := compactDelegate{processInfo: &processInfo}
 	l := list.New(items, delegate, listWidth, 24)
 	l.Title = "Sesh Sessions"
 	l.SetShowStatusBar(false) // Hide item count
@@ -108,10 +112,15 @@ func newModel(
 		currentFilter:  FilterAll,
 		keys:           DefaultKeyMap,
 		previewContent: "",
+		processInfo:    processInfo,
+		pendingPreview: "",
+		lastPreviewKey: "",
 	}
 }
 
 func (m Model) Init() tea.Cmd {
+	logDebug("DEBUG: TUI Init() called with %d sessions", len(m.sessions.OrderedIndex))
+
 	// Start with filter active and load preview for first session
 	cmds := []tea.Cmd{
 		func() tea.Msg {
@@ -125,6 +134,9 @@ func (m Model) Init() tea.Cmd {
 			cmds = append(cmds, loadPreview(m.previewer, item.session))
 		}
 	}
+
+	// Start async process detection for tmux sessions
+	cmds = append(cmds, detectProcessesForAllSessions(m.sessions))
 
 	return tea.Batch(cmds...)
 }

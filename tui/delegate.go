@@ -10,7 +10,9 @@ import (
 )
 
 // compactDelegate is a custom delegate with minimal spacing
-type compactDelegate struct{}
+type compactDelegate struct {
+	processInfo *map[string]string // Pointer to model's processInfo map
+}
 
 func (d compactDelegate) Height() int { return 1 } // Single line per item
 
@@ -26,13 +28,21 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	str := sessionItem.displayName
 
+	// Add process indicator on the right if detected (lookup from model's map)
+	var processIcon string
+	if d.processInfo != nil {
+		if process, ok := (*d.processInfo)[sessionItem.session.Name]; ok && process == "node" {
+			processIcon = " \033[32m⬢\033[0m" // Green Node.js hexagon
+		}
+	}
+
 	// Highlight selected item
 	if index == m.Index() {
 		str = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("170")).
-			Render("❯ " + str)
+			Render("❯ " + str + processIcon)
 	} else {
-		str = "  " + str
+		str = "  " + str + processIcon
 	}
 
 	fmt.Fprint(w, str)

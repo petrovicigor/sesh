@@ -6,6 +6,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// loadPreviewDebounced handles preview loading with debouncing
+// Returns updated model and command to execute
+func (m Model) loadPreviewDebounced(item sessionItem) (Model, tea.Cmd) {
+	sessionName := item.session.Name
+
+	// If this is the first selection, load immediately (no debounce)
+	if m.lastPreviewKey == "" {
+		m.previewPort.SetContent("") // Blank while loading
+		m.lastPreviewKey = sessionName
+		return m, loadPreview(m.previewer, item.session)
+	}
+
+	// Otherwise, debounce the preview load
+	m.pendingPreview = sessionName
+	m.previewPort.SetContent("") // Blank while waiting
+	return m, debouncePreview(sessionName)
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -39,6 +57,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions = msg.Sessions
 		m.list.SetItems(items)
 
+		// Clear processInfo map completely and re-detect for fresh state
+		// Don't replace the map - just clear it (delegate has pointer to it)
+		for k := range m.processInfo {
+			delete(m.processInfo, k)
+		}
+
 		// Reset list filter and cursor
 		m.list.ResetFilter()
 		if len(items) > 0 {
@@ -66,11 +90,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
 		}
 
-		return m, tea.Batch(previewCmd, filterCmd)
+		// Start async process detection for tmux sessions
+		processCmd := detectProcessesForAllSessions(msg.Sessions)
+
+		return m, tea.Batch(previewCmd, filterCmd, processCmd)
 
 	case PreviewLoadedMsg:
 		m.previewContent = msg.Content
 		m.previewPort.SetContent(msg.Content)
+		return m, nil
+
+	case ProcessDetectedMsg:
+		// DEBUG: Log when message is received
+		logDebug("DEBUG: ProcessDetectedMsg received for %s with process %s", msg.SessionName, msg.Process)
+
+		// Just update the processInfo map - delegate will read it on next render
+		m.processInfo[msg.SessionName] = msg.Process
+
+		// DEBUG: Log processInfo map
+		logDebug("DEBUG: processInfo map: %+v", m.processInfo)
+
+		// No list rebuild needed - just return to trigger re-render
+		return m, nil
+
+	case DebounceTickMsg:
+		// Only load preview if this session is still pending
+		// (user might have moved cursor away during debounce)
+		if msg.SessionName != m.pendingPreview {
+			return m, nil
+		}
+
+		// Find the session and load its preview
+		for _, key := range m.sessions.OrderedIndex {
+			session := m.sessions.Directory[key]
+			if session.Name == msg.SessionName {
+				m.lastPreviewKey = session.Name
+				m.pendingPreview = ""
+				return m, loadPreview(m.previewer, session)
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -137,20 +195,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "up":
 				m.list.CursorUp()
-				// Load preview for newly selected session
+				// Load preview for newly selected session with cache/debounce
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
-					// Blank preview while loading
-					m.previewPort.SetContent("")
-					return m, loadPreview(m.previewer, item.session)
+					return m.loadPreviewDebounced(item)
 				}
 				return m, nil
 			case "down":
 				m.list.CursorDown()
-				// Load preview for newly selected session
+				// Load preview for newly selected session with cache/debounce
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
-					// Blank preview while loading
-					m.previewPort.SetContent("")
-					return m, loadPreview(m.previewer, item.session)
+					return m.loadPreviewDebounced(item)
 				}
 				return m, nil
 			}
@@ -165,11 +219,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if currentFilter != m.lastFilter {
 			m.lastFilter = currentFilter
 			m.list.Select(0)
-			// Load preview for top item
+			// Load preview for top item with cache/debounce
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				// Blank preview while loading
-				m.previewPort.SetContent("")
-				return m, tea.Batch(cmd, loadPreview(m.previewer, item.session))
+				newModel, previewCmd := m.loadPreviewDebounced(item)
+				m = newModel
+				return m, tea.Batch(cmd, previewCmd)
 			}
 		}
 
