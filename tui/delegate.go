@@ -11,7 +11,7 @@ import (
 
 // compactDelegate is a custom delegate with minimal spacing
 type compactDelegate struct {
-	processInfo *map[string]string // Pointer to model's processInfo map
+	processInfo *map[string][]string // Pointer to model's processInfo map
 }
 
 func (d compactDelegate) Height() int { return 1 } // Single line per item
@@ -28,11 +28,26 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	str := sessionItem.displayName
 
-	// Add process indicator on the right if detected (lookup from model's map)
+	// Add process indicators on the right if detected (lookup from model's map)
 	var processIcon string
 	if d.processInfo != nil {
-		if process, ok := (*d.processInfo)[sessionItem.session.Name]; ok && process == "node" {
-			processIcon = " \033[32m⬢\033[0m" // Green Node.js hexagon
+		if processes, ok := (*d.processInfo)[sessionItem.session.Name]; ok {
+			// Map process names to Nerd Font icons and colors
+			processIcons := map[string]struct {
+				Icon  string
+				Color string
+			}{
+				"node": {Icon: "\ue718", Color: "34"},  // green
+				"npm":  {Icon: "\ue71e", Color: "196"}, // red
+				"yarn": {Icon: "\ue6a7", Color: "39"},  // blue
+			}
+
+			// Render all detected processes
+			for _, proc := range processes {
+				if iconData, exists := processIcons[proc]; exists {
+					processIcon += fmt.Sprintf(" \033[38;5;%sm%s\033[0m", iconData.Color, iconData.Icon)
+				}
+			}
 		}
 	}
 

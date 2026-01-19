@@ -1,11 +1,8 @@
 package lister
 
 import (
-	"fmt"
-	"os"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/joshmedeski/sesh/v2/model"
 )
@@ -53,9 +50,7 @@ func (l *RealLister) List(opts ListOptions) (model.SeshSessions, error) {
 		wg.Add(1)
 		go func(s string) {
 			defer wg.Done()
-			start := time.Now()
 			sessions, err := srcStrategies[s](l)
-			fmt.Fprintf(os.Stderr, "[TIMING] %s: %v\n", s, time.Since(start))
 			resultsChan <- strategyResult{source: s, sessions: sessions, err: err}
 		}(src)
 	}

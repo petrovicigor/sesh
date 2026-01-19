@@ -31,7 +31,7 @@ type Model struct {
 	keys           KeyMap
 	lastFilter     string            // Track last filter text to detect changes
 	previewContent string            // Current preview text
-	processInfo    map[string]string // session.Name -> process indicator (e.g., "node", "python")
+	processInfo    map[string][]string // session.Name -> []processes (e.g., ["node", "npm"])
 	pendingPreview string            // Session name waiting for debounce
 	lastPreviewKey string            // Last session name that had preview loaded
 }
@@ -62,7 +62,7 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	processInfo := make(map[string]string)
+	processInfo := make(map[string][]string)
 	delegate := compactDelegate{processInfo: &processInfo}
 	l := list.New(items, delegate, listWidth, 24)
 	l.Title = "Sesh Sessions"

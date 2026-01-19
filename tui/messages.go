@@ -21,7 +21,7 @@ type PreviewLoadedMsg struct {
 
 type ProcessDetectedMsg struct {
 	SessionName string
-	Process     string // "node", "python", etc.
+	Processes   []string // Changed from "Process string" to support multiple
 }
 
 type DebounceTickMsg struct {

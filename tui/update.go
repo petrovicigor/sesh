@@ -102,10 +102,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ProcessDetectedMsg:
 		// DEBUG: Log when message is received
-		logDebug("DEBUG: ProcessDetectedMsg received for %s with process %s", msg.SessionName, msg.Process)
+		logDebug("DEBUG: ProcessDetectedMsg received for %s with processes %v", msg.SessionName, msg.Processes)
 
 		// Just update the processInfo map - delegate will read it on next render
-		m.processInfo[msg.SessionName] = msg.Process
+		m.processInfo[msg.SessionName] = msg.Processes
 
 		// DEBUG: Log processInfo map
 		logDebug("DEBUG: processInfo map: %+v", m.processInfo)

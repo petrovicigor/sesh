@@ -62,7 +62,7 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 	}
 }
 
-// detectProcessForSession checks if a tmux session has a specific process running
+// detectProcessForSession checks if a tmux session has specific processes running
 func detectProcessForSession(session model.SeshSession) tea.Cmd {
 	return func() tea.Msg {
 		// Only check tmux sessions
@@ -71,11 +71,17 @@ func detectProcessForSession(session model.SeshSession) tea.Cmd {
 		}
 
 		// Get all pane commands for this session
+		start := time.Now()
 		cmd := exec.Command("tmux", "list-panes", "-t", session.Name, "-F", "#{pane_current_command}")
 		output, err := cmd.Output()
+		elapsed := time.Since(start)
+		logDebug("DEBUG: list-panes for %s took %v", session.Name, elapsed)
 		if err != nil {
 			return nil
 		}
+
+		// Collect all detected processes
+		detected := make(map[string]bool)
 
 		// Check each pane's command
 		lines := strings.Split(string(output), "\n")
@@ -87,12 +93,32 @@ func detectProcessForSession(session model.SeshSession) tea.Cmd {
 
 			// Detect Node.js processes
 			if line == "node" || strings.HasPrefix(line, "node ") {
-				// DEBUG: Log when node is detected
+				detected["node"] = true
 				logDebug("DEBUG: Node detected in session: %s (line: %s)", session.Name, line)
-				return ProcessDetectedMsg{
-					SessionName: session.Name,
-					Process:     "node",
-				}
+			}
+
+			// Detect npm processes
+			if line == "npm" || strings.HasPrefix(line, "npm ") {
+				detected["npm"] = true
+				logDebug("DEBUG: npm detected in session: %s (line: %s)", session.Name, line)
+			}
+
+			// Detect yarn processes
+			if line == "yarn" || strings.HasPrefix(line, "yarn ") {
+				detected["yarn"] = true
+				logDebug("DEBUG: Yarn detected in session: %s (line: %s)", session.Name, line)
+			}
+		}
+
+		// Return all detected processes
+		if len(detected) > 0 {
+			processes := make([]string, 0, len(detected))
+			for proc := range detected {
+				processes = append(processes, proc)
+			}
+			return ProcessDetectedMsg{
+				SessionName: session.Name,
+				Processes:   processes,
 			}
 		}
 
