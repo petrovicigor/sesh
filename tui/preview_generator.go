@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -324,11 +325,11 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 	// Check if process is active
 	isActive := false
 	if !hasEnded && pid > 0 {
-		// Check if process exists
+		// Check if process exists using signal 0 (same as kill -0)
 		process, err := os.FindProcess(int(pid))
 		if err == nil {
-			// On Unix, FindProcess always succeeds, so we try to signal it
-			err = process.Signal(os.Signal(nil))
+			// On Unix, FindProcess always succeeds, so we try to signal it with signal 0
+			err = process.Signal(syscall.Signal(0))
 			isActive = (err == nil)
 		}
 	}

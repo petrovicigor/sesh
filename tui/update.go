@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // loadPreviewDebounced handles preview loading with debouncing
@@ -38,6 +39,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(listWidth-4, msg.Height-4)      // -4 for border padding
 		m.previewPort.Width = previewWidth - 4
 		m.previewPort.Height = msg.Height - 4
+
+		// Re-wrap existing preview content for new width
+		if m.previewContent != "" {
+			wrappedContent := lipgloss.NewStyle().Width(m.previewPort.Width).Render(m.previewContent)
+			m.previewPort.SetContent(wrappedContent)
+		}
 
 		return m, nil
 
@@ -97,15 +104,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PreviewLoadedMsg:
 		m.previewContent = msg.Content
-		m.previewPort.SetContent(msg.Content)
+		// Wrap content to viewport width
+		wrappedContent := lipgloss.NewStyle().Width(m.previewPort.Width).Render(msg.Content)
+		m.previewPort.SetContent(wrappedContent)
 		return m, nil
 
 	case ProcessDetectedMsg:
 		// DEBUG: Log when message is received
-		logDebug("DEBUG: ProcessDetectedMsg received for %s with processes %v", msg.SessionName, msg.Processes)
+		logDebug("DEBUG: ProcessDetectedMsg received for %s with process %s", msg.SessionName, msg.Process)
 
 		// Just update the processInfo map - delegate will read it on next render
-		m.processInfo[msg.SessionName] = msg.Processes
+		m.processInfo[msg.SessionName] = msg.Process
 
 		// DEBUG: Log processInfo map
 		logDebug("DEBUG: processInfo map: %+v", m.processInfo)
