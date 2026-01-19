@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"os/exec"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -60,64 +58,6 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 		}
 		return PreviewLoadedMsg{Content: content}
 	}
-}
-
-// detectProcessForSession checks if a tmux session has a specific process running
-func detectProcessForSession(session model.SeshSession) tea.Cmd {
-	return func() tea.Msg {
-		// Only check tmux sessions
-		if session.Src != "tmux" {
-			return nil
-		}
-
-		// Get all pane commands for this session
-		start := time.Now()
-		cmd := exec.Command("tmux", "list-panes", "-t", session.Name, "-F", "#{pane_current_command}")
-		output, err := cmd.Output()
-		elapsed := time.Since(start)
-		logDebug("DEBUG: list-panes for %s took %v", session.Name, elapsed)
-		if err != nil {
-			return nil
-		}
-
-		// Check each pane's command
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(strings.ToLower(line))
-			if line == "" {
-				continue
-			}
-
-			// Detect Node.js processes
-			if line == "node" || strings.HasPrefix(line, "node ") {
-				// DEBUG: Log when node is detected
-				logDebug("DEBUG: Node detected in session: %s (line: %s)", session.Name, line)
-				return ProcessDetectedMsg{
-					SessionName: session.Name,
-					Process:     "node",
-				}
-			}
-		}
-
-		return nil
-	}
-}
-
-// detectProcessesForAllSessions launches async detection for all tmux sessions
-func detectProcessesForAllSessions(sessions model.SeshSessions) tea.Cmd {
-	var cmds []tea.Cmd
-	var tmuxSessions []string
-	for _, key := range sessions.OrderedIndex {
-		session := sessions.Directory[key]
-		// Check all tmux sessions (attached or not)
-		if session.Src == "tmux" {
-			tmuxSessions = append(tmuxSessions, session.Name)
-			cmds = append(cmds, detectProcessForSession(session))
-		}
-	}
-	// DEBUG: Log which sessions we're checking
-	logDebug("DEBUG: Checking %d tmux sessions for processes: %v", len(tmuxSessions), tmuxSessions)
-	return tea.Batch(cmds...)
 }
 
 // debouncePreview creates a debounced preview loading command
