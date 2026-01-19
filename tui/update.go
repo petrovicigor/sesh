@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -64,12 +66,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions = msg.Sessions
 		m.list.SetItems(items)
 
-		// Clear processInfo map completely and re-detect for fresh state
-		// Don't replace the map - just clear it (delegate has pointer to it)
-		for k := range m.processInfo {
-			delete(m.processInfo, k)
-		}
-
 		// Reset list filter and cursor
 		m.list.ResetFilter()
 		if len(items) > 0 {
@@ -97,29 +93,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
 		}
 
-		// Start async process detection for tmux sessions
-		processCmd := detectProcessesForAllSessions(msg.Sessions)
-
-		return m, tea.Batch(previewCmd, filterCmd, processCmd)
+		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
 		m.previewContent = msg.Content
 		// Wrap content to viewport width
 		wrappedContent := lipgloss.NewStyle().Width(m.previewPort.Width).Render(msg.Content)
 		m.previewPort.SetContent(wrappedContent)
-		return m, nil
-
-	case ProcessDetectedMsg:
-		// DEBUG: Log when message is received
-		logDebug("DEBUG: ProcessDetectedMsg received for %s with process %s", msg.SessionName, msg.Process)
-
-		// Just update the processInfo map - delegate will read it on next render
-		m.processInfo[msg.SessionName] = msg.Process
-
-		// DEBUG: Log processInfo map
-		logDebug("DEBUG: processInfo map: %+v", m.processInfo)
-
-		// No list rebuild needed - just return to trigger re-render
 		return m, nil
 
 	case DebounceTickMsg:
@@ -192,6 +172,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err == nil {
 						// Reload sessions after deletion
 						return m, loadSessionsWithFilter(m.lister, m.currentFilter)
+					}
+				}
+			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.GoToWorktreeRoot):
+			// Jump to worktree root if current session is a worktree
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				sessionName := item.session.Name
+				// Check if this is a worktree session (contains "/")
+				if strings.Contains(sessionName, "/") {
+					// Extract root name (everything before the first "/")
+					rootName := strings.Split(sessionName, "/")[0]
+					// Find the root session in the list
+					items := m.list.Items()
+					for i, listItem := range items {
+						if rootItem, ok := listItem.(sessionItem); ok {
+							if rootItem.session.Name == rootName {
+								m.list.Select(i)
+								// Load preview for the root session
+								return m.loadPreviewDebounced(rootItem)
+							}
+						}
 					}
 				}
 			}

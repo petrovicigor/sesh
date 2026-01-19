@@ -3,14 +3,15 @@ package tui
 import "github.com/charmbracelet/bubbles/key"
 
 type KeyMap struct {
-	Quit         key.Binding
-	Select       key.Binding
-	FilterAll    key.Binding
-	FilterTmux   key.Binding
-	FilterConfig key.Binding
-	FilterZoxide key.Binding
-	ToggleZoxide key.Binding
-	Delete       key.Binding
+	Quit             key.Binding
+	Select           key.Binding
+	FilterAll        key.Binding
+	FilterTmux       key.Binding
+	FilterConfig     key.Binding
+	FilterZoxide     key.Binding
+	ToggleZoxide     key.Binding
+	Delete           key.Binding
+	GoToWorktreeRoot key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -45,5 +46,9 @@ var DefaultKeyMap = KeyMap{
 	Delete: key.NewBinding(
 		key.WithKeys("ctrl+d", "ctrl+k"),
 		key.WithHelp("ctrl+d/ctrl+k", "delete session"),
+	),
+	GoToWorktreeRoot: key.NewBinding(
+		key.WithKeys("ctrl+0"),
+		key.WithHelp("ctrl+0", "go to worktree root"),
 	),
 }
