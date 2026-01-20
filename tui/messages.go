@@ -12,7 +12,9 @@ const (
 )
 
 type SessionsLoadedMsg struct {
-	Sessions model.SeshSessions
+	Sessions            model.SeshSessions
+	PreserveFilterText  string // Filter text to restore ("" = don't preserve)
+	PreserveCursorIndex int    // Cursor index to restore (-1 = don't preserve)
 }
 
 type PreviewLoadedMsg struct {
@@ -21,4 +23,10 @@ type PreviewLoadedMsg struct {
 
 type DebounceTickMsg struct {
 	SessionName string
+}
+
+type RestorationCompleteMsg struct{}
+
+type setCursorMsg struct {
+	index int
 }

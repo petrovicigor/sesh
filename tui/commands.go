@@ -34,6 +34,35 @@ func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
 	}
 }
 
+func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText string, cursorIndex int) tea.Cmd {
+	return func() tea.Msg {
+		opts := lister.ListOptions{
+			HideDuplicates: true, // Hide duplicate sessions
+		}
+
+		switch filter {
+		case FilterTmux:
+			opts.Tmux = true
+		case FilterConfig:
+			opts.Config = true
+		case FilterZoxide:
+			opts.Zoxide = true
+		case FilterAll:
+			// No filter - load all
+		}
+
+		sessions, err := l.List(opts)
+		if err != nil {
+			return nil
+		}
+		return SessionsLoadedMsg{
+			Sessions:            sessions,
+			PreserveFilterText:  filterText,
+			PreserveCursorIndex: cursorIndex,
+		}
+	}
+}
+
 func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 	return func() tea.Msg {
 		// Determine if this is an active tmux session
@@ -66,4 +95,32 @@ func debouncePreview(sessionName string) tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
 		return DebounceTickMsg{SessionName: sessionName}
 	})
+}
+
+// restoreFilterMode re-enters filter mode and optionally types filter text
+func restoreFilterMode(filterText string) tea.Cmd {
+	// Create sequence: first '/', then each character of filter text, then completion message
+	cmds := make([]tea.Cmd, 0, len(filterText)+2)
+
+	// Enter filter mode
+	cmds = append(cmds, func() tea.Msg {
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+	})
+
+	// Type each character of the filter text
+	if filterText != "" {
+		for _, r := range filterText {
+			r := r // capture loop variable
+			cmds = append(cmds, func() tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+			})
+		}
+	}
+
+	// Signal restoration complete
+	cmds = append(cmds, func() tea.Msg {
+		return RestorationCompleteMsg{}
+	})
+
+	return tea.Sequence(cmds...)
 }

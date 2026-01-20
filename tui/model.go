@@ -63,6 +63,7 @@ type Model struct {
 	previewContent string // Current preview text
 	pendingPreview string // Session name waiting for debounce
 	lastPreviewKey string // Last session name that had preview loaded
+	restoringState bool   // True when restoring filter text after ctrl+d
 }
 
 func newModel(
