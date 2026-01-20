@@ -35,7 +35,18 @@
       "Bash(tmux display-message:*)",
       "Bash(zoxide query:*)",
       "Bash(go doc:*)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git -C /Users/igorpetrovic/Projects/sesh worktree list)",
+      "Skill(superpowers:execute-plan)",
+      "Bash(tmux list-windows:*)",
+      "Bash(while read gitfile)",
+      "Bash(do dirname \"$gitfile\")",
+      "Bash(for dir in */)",
+      "Bash(do if [ -d \"$dir/.git\" ])",
+      "Bash([ -f \"$dir/.git\" ])",
+      "Bash(then echo \"=== $dir ===\")",
+      "Bash(git -C:*)",
+      "Bash(fi)"
     ]
   }
 }
