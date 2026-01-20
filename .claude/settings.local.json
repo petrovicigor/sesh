@@ -31,7 +31,11 @@
       "Bash(do echo \"Run $i:\")",
       "Bash(tmux list-panes:*)",
       "Bash(tmux new-session:*)",
-      "Bash(tmux kill-session:*)"
+      "Bash(tmux kill-session:*)",
+      "Bash(tmux display-message:*)",
+      "Bash(zoxide query:*)",
+      "Bash(go doc:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
