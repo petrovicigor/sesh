@@ -103,6 +103,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewRootSessionCommand(lister, namer),
 		NewPreviewCommand(previewer),
 		NewPathCommand(icon, lister),
+		NewFindByPathCommand(lister),
 		NewTuiCommand(lister, connector, icon, tmux, config, previewer),
 	)
 

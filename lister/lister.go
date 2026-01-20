@@ -13,6 +13,7 @@ import (
 type Lister interface {
 	List(opts ListOptions) (model.SeshSessions, error)
 	FindTmuxSession(name string) (model.SeshSession, bool)
+	FindTmuxSessionByPath(path string) (model.SeshSession, bool)
 	GetAttachedTmuxSession() (model.SeshSession, bool)
 	GetLastTmuxSession() (model.SeshSession, bool)
 	ListTmuxSessions() model.SeshSessions

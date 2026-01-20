@@ -89,3 +89,28 @@ func GetAttachedTmuxSession(l *RealLister) (model.SeshSession, bool) {
 	}
 	return model.SeshSession{}, false
 }
+
+func (l *RealLister) FindTmuxSessionByPath(path string) (model.SeshSession, bool) {
+	// Normalize path by trimming trailing slashes
+	normalizedPath := path
+	if len(normalizedPath) > 1 && normalizedPath[len(normalizedPath)-1] == '/' {
+		normalizedPath = normalizedPath[:len(normalizedPath)-1]
+	}
+
+	sessions, err := listTmux(l)
+	if err != nil {
+		return model.SeshSession{}, false
+	}
+	for _, key := range sessions.OrderedIndex {
+		session := sessions.Directory[key]
+		// Normalize session path as well
+		sessionPath := session.Path
+		if len(sessionPath) > 1 && sessionPath[len(sessionPath)-1] == '/' {
+			sessionPath = sessionPath[:len(sessionPath)-1]
+		}
+		if sessionPath == normalizedPath {
+			return session, true
+		}
+	}
+	return model.SeshSession{}, false
+}
