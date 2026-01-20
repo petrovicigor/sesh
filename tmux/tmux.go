@@ -16,6 +16,7 @@ type Tmux interface {
 	SwitchClient(targetSession string) (string, error)
 	CapturePane(targetSession string) (string, error)
 	NextWindow() (string, error)
+	NextWindowInSession(sessionName string) (string, error)
 	SwitchOrAttach(name string, opts model.ConnectOpts) (string, error)
 	KillSession(name string) (string, error)
 }
@@ -55,6 +56,10 @@ func (t *RealTmux) CapturePane(targetSession string) (string, error) {
 
 func (t *RealTmux) NextWindow() (string, error) {
 	return t.shell.Cmd("tmux", "next-window")
+}
+
+func (t *RealTmux) NextWindowInSession(sessionName string) (string, error) {
+	return t.shell.Cmd("tmux", "next-window", "-t", sessionName)
 }
 
 func (t *RealTmux) KillSession(name string) (string, error) {

@@ -74,7 +74,7 @@ func (s *RealStartup) Exec(session model.SeshSession) (string, error) {
 			return ret, err
 		}
 	}
-	s.tmux.NextWindow()
+	s.tmux.NextWindowInSession(session.Name)
 
 	for _, strategy := range strategies {
 		if command, err := strategy(s, session); err != nil {
