@@ -1,11 +1,8 @@
 all: true
 dir: '{{.InterfaceDir}}'
-structname: Mock{{.InterfaceName}}
-pkgname: '{{.SrcPackageName}}'
+mockname: Mock{{.InterfaceName}}
 filename: mock_{{.InterfaceName}}.go
-template: testify
-template-data:
-  unroll-variadic: true
+inpackage: true
 packages:
   github.com/joshmedeski/sesh:
     config:

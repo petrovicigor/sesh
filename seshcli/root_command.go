@@ -97,7 +97,7 @@ func NewRootCommand(version string) *cobra.Command {
 	// Add subcommands
 	rootCmd.AddCommand(
 		NewListCommand(icon, json, lister),
-		NewLastCommand(lister, tmux),
+		NewLastCommand(lister, tmux, recentTracker, connector),
 		NewConnectCommand(connector, icon, dir),
 		NewCloneCommand(cloner),
 		NewRootSessionCommand(lister, namer),
