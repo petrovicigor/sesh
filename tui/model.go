@@ -13,6 +13,36 @@ import (
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
+// tmuxFirstFilter returns a custom FilterFunc that groups tmux sessions first
+func tmuxFirstFilter(items []list.Item) list.FilterFunc {
+	return func(term string, targets []string) []list.Rank {
+		// Use default fuzzy filter to get matches
+		ranks := list.DefaultFilter(term, targets)
+
+		// Partition ranks by tmux sessions vs others
+		tmuxRanks := make([]list.Rank, 0)
+		otherRanks := make([]list.Rank, 0)
+
+		for _, rank := range ranks {
+			if rank.Index < len(items) {
+				if item, ok := items[rank.Index].(sessionItem); ok {
+					if item.session.Src == "tmux" {
+						tmuxRanks = append(tmuxRanks, rank)
+					} else {
+						otherRanks = append(otherRanks, rank)
+					}
+				}
+			}
+		}
+
+		// Concatenate: tmux first, then others
+		result := make([]list.Rank, 0, len(ranks))
+		result = append(result, tmuxRanks...)
+		result = append(result, otherRanks...)
+		return result
+	}
+}
+
 type Model struct {
 	lister    lister.Lister
 	connector connector.Connector
@@ -57,6 +87,9 @@ func newModel(
 		}
 	}
 
+	// Partition items so tmux sessions appear first
+	items = partitionItemsByTmux(items)
+
 	// Create list with items using compact delegate
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
@@ -69,6 +102,9 @@ func newModel(
 	l.SetFilteringEnabled(true)
 	l.SetShowTitle(false) // Hide default title, we'll render custom one
 	l.SetShowHelp(false)  // Hide help to keep UI clean
+
+	// Use custom filter that groups tmux sessions first
+	l.Filter = tmuxFirstFilter(items)
 
 	// Create preview viewport
 	vp := viewport.New(previewWidth, 24)

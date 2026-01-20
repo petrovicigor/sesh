@@ -64,7 +64,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.sessions = msg.Sessions
+
+		// Partition items so tmux sessions appear first
+		items = partitionItemsByTmux(items)
 		m.list.SetItems(items)
+
+		// Update filter function with new items
+		m.list.Filter = tmuxFirstFilter(items)
 
 		// Reset list filter and cursor
 		m.list.ResetFilter()
@@ -259,4 +265,31 @@ func getFilterTitle(filter FilterType) string {
 	default:
 		return "⚡ Sesh Sessions"
 	}
+}
+
+// partitionItemsByTmux groups tmux sessions first, then all other sessions
+// Preserves the fuzzy match ordering within each group
+func partitionItemsByTmux(items []list.Item) []list.Item {
+	if len(items) <= 1 {
+		return items
+	}
+
+	tmuxItems := make([]list.Item, 0, len(items))
+	otherItems := make([]list.Item, 0, len(items))
+
+	for _, item := range items {
+		if sessionItem, ok := item.(sessionItem); ok {
+			if sessionItem.session.Src == "tmux" {
+				tmuxItems = append(tmuxItems, item)
+			} else {
+				otherItems = append(otherItems, item)
+			}
+		}
+	}
+
+	// Concatenate: tmux first, then others
+	result := make([]list.Item, 0, len(items))
+	result = append(result, tmuxItems...)
+	result = append(result, otherItems...)
+	return result
 }
