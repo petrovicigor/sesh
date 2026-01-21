@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -59,11 +61,12 @@ type Model struct {
 	height         int
 	currentFilter  FilterType
 	keys           KeyMap
-	lastFilter     string // Track last filter text to detect changes
-	previewContent string // Current preview text
-	pendingPreview string // Session name waiting for debounce
-	lastPreviewKey string // Last session name that had preview loaded
-	restoringState bool   // True when restoring filter text after ctrl+d
+	lastFilter     string            // Track last filter text to detect changes
+	previewContent string            // Current preview text
+	pendingPreview string            // Session name waiting for debounce
+	lastPreviewKey string            // Last session name that had preview loaded
+	restoringState bool              // True when restoring filter text after ctrl+d
+	processInfo    map[string]string // session -> detected process
 }
 
 func newModel(
@@ -91,11 +94,23 @@ func newModel(
 	// Partition items so tmux sessions appear first
 	items = partitionItemsByTmux(items)
 
+	// Create model instance first (we need to pass processInfo pointer to delegate)
+	m := Model{
+		sessions:       sessions,
+		width:          80,
+		height:         24,
+		currentFilter:  FilterAll,
+		previewContent: "",
+		pendingPreview: "",
+		lastPreviewKey: "",
+		processInfo:    make(map[string]string),
+	}
+
 	// Create list with items using compact delegate
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{}
+	delegate := compactDelegate{processInfo: &m.processInfo}
 	l := list.New(items, delegate, listWidth, 24)
 	l.Title = "Sesh Sessions"
 	l.SetShowStatusBar(false) // Hide item count
@@ -132,24 +147,18 @@ func newModel(
 	l.FilterInput.Prompt = ""
 	l.FilterInput.PromptStyle = styles.FilterPrompt
 
-	return Model{
-		lister:         lister,
-		connector:      connector,
-		icon:           icon,
-		tmux:           tmux,
-		config:         config,
-		previewer:      previewer,
-		list:           l,
-		previewPort:    vp,
-		sessions:       sessions,
-		width:          80,
-		height:         24,
-		currentFilter:  FilterAll,
-		keys:           DefaultKeyMap,
-		previewContent: "",
-		pendingPreview: "",
-		lastPreviewKey: "",
-	}
+	// Complete model initialization with remaining fields
+	m.lister = lister
+	m.connector = connector
+	m.icon = icon
+	m.tmux = tmux
+	m.config = config
+	m.previewer = previewer
+	m.list = l
+	m.previewPort = vp
+	m.keys = DefaultKeyMap
+
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -168,6 +177,11 @@ func (m Model) Init() tea.Cmd {
 			cmds = append(cmds, loadPreview(m.previewer, item.session))
 		}
 	}
+
+	// Schedule process detection after first render (10ms delay)
+	cmds = append(cmds, tea.Tick(10*time.Millisecond, func(time.Time) tea.Msg {
+		return StartProcessDetectionMsg{}
+	}))
 
 	return tea.Batch(cmds...)
 }

@@ -215,6 +215,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.restoringState = false
 		return m, nil
 
+	case StartProcessDetectionMsg:
+		return m, detectAllProcesses()
+
+	case ProcessInfoMsg:
+		m.processInfo = msg.Processes
+
+		// Update the delegate with the correct pointer to our processInfo
+		// (the original pointer from newModel is stale due to struct copy)
+		delegate := compactDelegate{processInfo: &m.processInfo}
+		m.list.SetDelegate(delegate)
+
+		return m, nil
+
 	case setCursorMsg:
 		// Set cursor position and load preview
 		m.list.Select(msg.index)
