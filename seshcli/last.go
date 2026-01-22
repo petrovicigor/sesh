@@ -43,12 +43,27 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 			})
 
 			// Find the most recent session that's NOT the current one
+			// First pass: prefer sessions that still exist in tmux
 			var targetSession string
+			var fallbackSession string // First non-current session (may not exist in tmux)
+
 			for _, entry := range sortedRecent {
 				if !currentExists || entry.name != currentSession.Name {
-					targetSession = entry.name
-					break
+					// Track the first candidate as fallback (for recreating killed sessions)
+					if fallbackSession == "" {
+						fallbackSession = entry.name
+					}
+					// Prefer sessions that still exist in tmux
+					if _, exists := l.FindTmuxSession(entry.name); exists {
+						targetSession = entry.name
+						break
+					}
 				}
+			}
+
+			// If no existing session found, use fallback (recreates the killed session)
+			if targetSession == "" {
+				targetSession = fallbackSession
 			}
 
 			if targetSession == "" {
