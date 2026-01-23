@@ -42,8 +42,8 @@ func (c *RealConnector) Connect(name string, opts model.ConnectOpts) (string, er
 			result, err := connectStrategy[connection.Session.Src](c, connection, opts)
 			if err == nil {
 				// Record session as recently used (ignore errors to not break connection)
-				// SkipRecent defaults to false, only zoxide sets it to true
-				if !connection.SkipRecent {
+				// SkipRecent can be set by callers (like sesh last) to avoid feedback loops
+				if !connection.SkipRecent && !opts.SkipRecent {
 					_ = c.recent.RecordSession(connection.Session.Name)
 				}
 			}

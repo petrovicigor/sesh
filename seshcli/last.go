@@ -71,7 +71,9 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 			}
 
 			// Use connector - it handles switch/attach and session creation
-			_, err := c.Connect(targetSession, model.ConnectOpts{})
+			// Only skip recording when NOT in tmux (to avoid feedback loop)
+			// When in tmux, record normally (legitimate session switching)
+			_, err := c.Connect(targetSession, model.ConnectOpts{SkipRecent: !currentExists})
 			if err != nil {
 				return fmt.Errorf("failed to connect to last session '%s': %w", targetSession, err)
 			}
