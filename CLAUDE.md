@@ -34,20 +34,19 @@ Sesh is a smart terminal session manager written in Go that helps users create a
 
 ### Build and Install
 
-**IMPORTANT**: After making any code changes, always build and install the binary to the user's Dotfiles bin:
+**IMPORTANT**: After making any code changes, always build the binary:
 
 ```bash
-# Build and install in one command (ALWAYS USE THIS)
-go build -o ./sesh && cp ./sesh /Users/igorpetrovic/Dotfiles/bin/sesh
+# Build to the symlink target (ALWAYS USE THIS)
+go build -o /Users/igorpetrovic/Projects/sesh/bin/sesh
 ```
 
-The user's active `sesh` binary is located at `/Users/igorpetrovic/Dotfiles/bin/sesh` (not in `$GOPATH/bin`). You must update this location after any changes.
+**IMPORTANT**: `/Users/igorpetrovic/Dotfiles/bin/sesh` is a **symlink** to `/Users/igorpetrovic/Projects/sesh/bin/sesh`. DO NOT copy the binary - just build to the symlink target location. The symlink will automatically point to the new binary.
 
-**Standard build** (for testing only, does not update the active binary):
+**Never do this:**
 ```bash
-make build
-# Or directly:
-go build -o ./sesh
+# WRONG - Don't copy, the file is a symlink!
+go build -o ./sesh && cp ./sesh /Users/igorpetrovic/Dotfiles/bin/sesh
 ```
 
 ### Test
