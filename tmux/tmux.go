@@ -1,6 +1,8 @@
 package tmux
 
 import (
+	"strings"
+
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/oswrap"
 	"github.com/joshmedeski/sesh/v2/shell"
@@ -11,6 +13,7 @@ type Tmux interface {
 	NewSession(sessionName string, startDir string) (string, error)
 	NewWindow(startDir string, name string) (string, error)
 	IsAttached() bool
+	GetCurrentSessionName() (string, error)
 	AttachSession(targetSession string) (string, error)
 	SendKeys(name string, command string) (string, error)
 	SwitchClient(targetSession string) (string, error)
@@ -68,4 +71,12 @@ func (t *RealTmux) KillSession(name string) (string, error) {
 
 func (t *RealTmux) IsAttached() bool {
 	return len(t.os.Getenv("TMUX")) > 0
+}
+
+func (t *RealTmux) GetCurrentSessionName() (string, error) {
+	name, err := t.shell.Cmd("tmux", "display-message", "-p", "#S")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(name), nil
 }

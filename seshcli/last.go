@@ -20,8 +20,15 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 		Aliases: []string{"L"},
 		Short:   "Connect to the last tmux session",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Get current session (if attached)
-			currentSession, currentExists := l.GetAttachedTmuxSession()
+			isAttached := t.IsAttached()
+
+			// FAST PATH: Try to get current session name without full list
+			currentName := ""
+			if isAttached {
+				if name, err := t.GetCurrentSessionName(); err == nil {
+					currentName = name
+				}
+			}
 
 			// Get recent sessions sorted by timestamp (most recent first)
 			recentSessions := r.GetAll()
@@ -41,6 +48,27 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 			sort.Slice(sortedRecent, func(i, j int) bool {
 				return sortedRecent[i].time.After(sortedRecent[j].time)
 			})
+
+			// FAST PATH: Try direct switch to first candidate
+			// This skips the full session list call in the common case
+			for _, entry := range sortedRecent {
+				if entry.name != currentName {
+					// Try direct switch (will fail if session doesn't exist)
+					if _, err := t.SwitchClient(entry.name); err == nil {
+						// Success! Record the session if attached
+						if isAttached {
+							_ = r.RecordSession(entry.name)
+						}
+						return nil
+					}
+					// Switch failed - break to fall back to full approach
+					break
+				}
+			}
+
+			// FALLBACK: Full approach with existence checking
+			// This happens if the fast-path switch failed (session doesn't exist)
+			currentSession, currentExists := l.GetAttachedTmuxSession()
 
 			// Find the most recent session that's NOT the current one
 			// First pass: prefer sessions that still exist in tmux
