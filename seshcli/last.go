@@ -49,19 +49,26 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 				return sortedRecent[i].time.After(sortedRecent[j].time)
 			})
 
-			// FAST PATH: Try direct switch to first candidate
+			// FAST PATH: Try direct attach/switch to first candidate
 			// This skips the full session list call in the common case
 			for _, entry := range sortedRecent {
 				if entry.name != currentName {
-					// Try direct switch (will fail if session doesn't exist)
-					if _, err := t.SwitchClient(entry.name); err == nil {
+					// Try direct attach (outside tmux) or switch (inside tmux)
+					var err error
+					if isAttached {
+						_, err = t.SwitchClient(entry.name)
+					} else {
+						_, err = t.AttachSession(entry.name)
+					}
+
+					if err == nil {
 						// Success! Record the session if attached
 						if isAttached {
 							_ = r.RecordSession(entry.name)
 						}
 						return nil
 					}
-					// Switch failed - break to fall back to full approach
+					// Attach/switch failed - break to fall back to full approach
 					break
 				}
 			}
