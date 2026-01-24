@@ -91,7 +91,7 @@ func (i *RealIcon) AddIcon(s model.SeshSession) string {
 		icon = zoxideIcon // use folder icon
 		colorCode = 32     // green (different from zoxide)
 	case "config":
-		icon = configIcon
+		icon = zoxideIcon
 		colorCode = 90 // gray
 	}
 
