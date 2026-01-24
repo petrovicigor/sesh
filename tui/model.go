@@ -22,8 +22,9 @@ func tmuxFirstFilter(items []list.Item) list.FilterFunc {
 		ranks := list.DefaultFilter(term, targets)
 
 		// Partition ranks by tmux sessions vs others
-		tmuxRanks := make([]list.Rank, 0)
-		otherRanks := make([]list.Rank, 0)
+		estimatedSize := len(ranks) / 2
+		tmuxRanks := make([]list.Rank, 0, estimatedSize)
+		otherRanks := make([]list.Rank, 0, estimatedSize)
 
 		for _, rank := range ranks {
 			if rank.Index < len(items) {
