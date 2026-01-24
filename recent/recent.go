@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -54,13 +55,9 @@ func (r *RealRecent) RecordSession(name string) error {
 		}
 
 		// Sort by time (oldest first)
-		for i := 0; i < len(entries)-1; i++ {
-			for j := i + 1; j < len(entries); j++ {
-				if entries[i].time.After(entries[j].time) {
-					entries[i], entries[j] = entries[j], entries[i]
-				}
-			}
-		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].time.Before(entries[j].time)
+		})
 
 		// Remove oldest entries
 		toRemove := len(entries) - maxRecentSessions
