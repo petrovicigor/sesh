@@ -21,6 +21,7 @@ type Lister interface {
 	FindZoxideSession(name string) (model.SeshSession, bool)
 	FindTmuxinatorConfig(name string) (model.SeshSession, bool)
 	FindProjectSession(name string) (model.SeshSession, bool)
+	InvalidateTmuxCache()
 }
 
 type RealLister struct {
@@ -31,8 +32,27 @@ type RealLister struct {
 	tmuxinator tmuxinator.Tmuxinator
 	git        git.Git
 	recent     recent.Recent
+
+	// Tmux session cache (per-request)
+	tmuxCache       model.SeshSessions
+	tmuxCacheLoaded bool
 }
 
 func NewLister(config model.Config, home home.Home, tmux tmux.Tmux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator, git git.Git, recent recent.Recent) Lister {
-	return &RealLister{config, home, tmux, zoxide, tmuxinator, git, recent}
+	return &RealLister{
+		config:          config,
+		home:            home,
+		tmux:            tmux,
+		zoxide:          zoxide,
+		tmuxinator:      tmuxinator,
+		git:             git,
+		recent:          recent,
+		tmuxCache:       model.SeshSessions{},
+		tmuxCacheLoaded: false,
+	}
+}
+
+func (l *RealLister) InvalidateTmuxCache() {
+	l.tmuxCacheLoaded = false
+	l.tmuxCache = model.SeshSessions{}
 }

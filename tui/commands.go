@@ -13,6 +13,9 @@ import (
 
 func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
 	return func() tea.Msg {
+		// Invalidate tmux cache to get fresh session data
+		l.InvalidateTmuxCache()
+
 		opts := lister.ListOptions{
 			HideDuplicates: true, // Hide duplicate sessions
 		}
@@ -38,6 +41,9 @@ func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
 
 func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText string, cursorIndex int) tea.Cmd {
 	return func() tea.Msg {
+		// Invalidate tmux cache to get fresh session data after deletion
+		l.InvalidateTmuxCache()
+
 		opts := lister.ListOptions{
 			HideDuplicates: true, // Hide duplicate sessions
 		}

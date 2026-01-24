@@ -11,6 +11,11 @@ func tmuxKey(name string) string {
 }
 
 func listTmux(l *RealLister) (model.SeshSessions, error) {
+	// Return cached if available
+	if l.tmuxCacheLoaded {
+		return l.tmuxCache, nil
+	}
+
 	tmuxSessions, err := l.tmux.ListSessions()
 	if err != nil {
 		return model.SeshSessions{}, fmt.Errorf("couldn't list tmux sessions: %q", err)
@@ -31,10 +36,16 @@ func listTmux(l *RealLister) (model.SeshSessions, error) {
 		}
 	}
 
-	return model.SeshSessions{
+	result := model.SeshSessions{
 		Directory:    directory,
 		OrderedIndex: orderedIndex,
-	}, nil
+	}
+
+	// Cache the result
+	l.tmuxCache = result
+	l.tmuxCacheLoaded = true
+
+	return result, nil
 }
 
 func (l *RealLister) FindTmuxSession(name string) (model.SeshSession, bool) {
@@ -72,19 +83,14 @@ func (l *RealLister) GetAttachedTmuxSession() (model.SeshSession, bool) {
 }
 
 func GetAttachedTmuxSession(l *RealLister) (model.SeshSession, bool) {
-	tmuxSessions, err := l.tmux.ListSessions()
+	sessions, err := listTmux(l)
 	if err != nil {
 		return model.SeshSession{}, false
 	}
-	for _, session := range tmuxSessions {
+	for _, key := range sessions.OrderedIndex {
+		session := sessions.Directory[key]
 		if session.Attached != 0 {
-			return model.SeshSession{
-				Src:      "tmux",
-				Name:     session.Name,
-				Path:     session.Path,
-				Attached: session.Attached,
-				Windows:  session.Windows,
-			}, true
+			return session, true
 		}
 	}
 	return model.SeshSession{}, false
