@@ -9,6 +9,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Cached styles to avoid per-item allocations during rendering
+var (
+	nodeIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	selectedItemStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
+	nodeIndicatorStr   = nodeIndicatorStyle.Render(" ⬢") // Pre-rendered
+)
+
 // compactDelegate is a custom delegate with minimal spacing
 type compactDelegate struct {
 	processInfo *map[string]string
@@ -32,18 +39,14 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	nodeIndicator := ""
 	if d.processInfo != nil {
 		if process, ok := (*d.processInfo)[sessionItem.session.Name]; ok && process == "node" {
-			// Green Node.js hexagon after the name (ANSI color 2 = green)
-			nodeIndicator = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("2")).
-				Render(" ⬢")
+			// Green Node.js hexagon after the name (using cached style)
+			nodeIndicator = nodeIndicatorStr
 		}
 	}
 
 	// Highlight selected item
 	if index == m.Index() {
-		str = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("170")).
-			Render("❯ " + str + nodeIndicator)
+		str = selectedItemStyle.Render("❯ " + str + nodeIndicator)
 	} else {
 		str = "  " + str + nodeIndicator
 	}
