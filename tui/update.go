@@ -223,13 +223,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, detectAllProcesses()
 
 	case ProcessInfoMsg:
-		m.processInfo = msg.Processes
-
-		// Update the delegate with the correct pointer to our processInfo
-		// (the original pointer from newModel is stale due to struct copy)
-		delegate := compactDelegate{processInfo: &m.processInfo}
-		m.list.SetDelegate(delegate)
-
+		// Update map in-place to preserve delegate's pointer reference
+		// Clear existing entries
+		for k := range m.processInfo {
+			delete(m.processInfo, k)
+		}
+		// Copy new entries
+		for k, v := range msg.Processes {
+			m.processInfo[k] = v
+		}
 		return m, nil
 
 	case setCursorMsg:
