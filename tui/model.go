@@ -54,20 +54,21 @@ type Model struct {
 	config    model.Config
 	previewer previewer.Previewer
 
-	list           list.Model
-	previewPort    viewport.Model
-	sessions       model.SeshSessions
-	selected       string
-	width          int
-	height         int
-	currentFilter  FilterType
-	keys           KeyMap
-	lastFilter     string            // Track last filter text to detect changes
-	previewContent string            // Current preview text
-	pendingPreview string            // Session name waiting for debounce
-	lastPreviewKey string            // Last session name that had preview loaded
-	restoringState bool              // True when restoring filter text after ctrl+d
-	processInfo    map[string]string // session -> detected process
+	list             list.Model
+	previewPort      viewport.Model
+	sessions         model.SeshSessions
+	selected         string
+	width            int
+	height           int
+	currentFilter    FilterType
+	keys             KeyMap
+	lastFilter       string            // Track last filter text to detect changes
+	previewContent   string            // Current preview text
+	pendingPreview   string            // Session name waiting for debounce
+	lastPreviewKey   string            // Last session name that had preview loaded
+	restoringState   bool              // True when restoring filter text after ctrl+d
+	processInfo      map[string]string // session -> detected process
+	previewWrapWidth int               // Track last width used for preview wrapping
 }
 
 func newModel(

@@ -48,7 +48,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Re-wrap existing preview content for new width
 		if m.previewContent != "" {
-			wrappedContent := lipgloss.NewStyle().Width(m.previewPort.Width).Render(m.previewContent)
+			// Only recreate wrap style if width changed
+			if m.previewPort.Width != m.previewWrapWidth {
+				m.previewWrapWidth = m.previewPort.Width
+			}
+			wrappedContent := lipgloss.NewStyle().Width(m.previewWrapWidth).Render(m.previewContent)
 			m.previewPort.SetContent(wrappedContent)
 		}
 
@@ -191,8 +195,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PreviewLoadedMsg:
 		m.previewContent = msg.Content
-		// Wrap content to viewport width
-		wrappedContent := lipgloss.NewStyle().Width(m.previewPort.Width).Render(msg.Content)
+		// Only recreate wrap style if width changed
+		if m.previewPort.Width != m.previewWrapWidth {
+			m.previewWrapWidth = m.previewPort.Width
+		}
+		wrappedContent := lipgloss.NewStyle().Width(m.previewWrapWidth).Render(msg.Content)
 		m.previewPort.SetContent(wrappedContent)
 		return m, nil
 
