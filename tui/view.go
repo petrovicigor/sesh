@@ -19,6 +19,8 @@ var (
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("240")).
 			Padding(1)
+
+	constrainedStyle = lipgloss.NewStyle()
 )
 
 func (m Model) View() string {
@@ -34,7 +36,7 @@ func (m Model) View() string {
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, listView, previewView)
 
 	// Constrain total width to terminal width
-	constrained := lipgloss.NewStyle().MaxWidth(m.width).Render(columns)
+	constrained := constrainedStyle.MaxWidth(m.width).Render(columns)
 
 	return title + constrained
 }
