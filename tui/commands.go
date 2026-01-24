@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"os/exec"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -133,36 +131,3 @@ func restoreFilterMode(filterText string) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-// detectAllProcesses runs a single tmux command to detect processes in all sessions
-func detectAllProcesses() tea.Cmd {
-	return func() tea.Msg {
-		// Single command for all sessions
-		cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}\t#{pane_current_command}")
-		output, err := cmd.Output()
-		if err != nil {
-			return ProcessInfoMsg{Processes: nil}
-		}
-
-		processes := make(map[string]string)
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
-			parts := strings.SplitN(line, "\t", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			sessionName := parts[0]
-			command := strings.ToLower(strings.TrimSpace(parts[1]))
-
-			// Already detected? Skip
-			if _, exists := processes[sessionName]; exists {
-				continue
-			}
-
-			// Detect Node.js
-			if command == "node" || strings.HasPrefix(command, "node ") {
-				processes[sessionName] = "node"
-			}
-		}
-		return ProcessInfoMsg{Processes: processes}
-	}
-}

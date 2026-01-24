@@ -11,15 +11,12 @@ import (
 
 // Cached styles to avoid per-item allocations during rendering
 var (
-	nodeIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	selectedItemStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
-	nodeIndicatorStr   = nodeIndicatorStyle.Render(" ⬢") // Pre-rendered
+	selectedItemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
 )
 
 // compactDelegate is a custom delegate with minimal spacing
-type compactDelegate struct {
-	processInfo *map[string]string
-}
+type compactDelegate struct{}
+
 
 func (d compactDelegate) Height() int { return 1 } // Single line per item
 
@@ -35,20 +32,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	str := sessionItem.displayName
 
-	// Add process indicator if available
-	nodeIndicator := ""
-	if d.processInfo != nil {
-		if process, ok := (*d.processInfo)[sessionItem.session.Name]; ok && process == "node" {
-			// Green Node.js hexagon after the name (using cached style)
-			nodeIndicator = nodeIndicatorStr
-		}
-	}
-
 	// Highlight selected item
 	if index == m.Index() {
-		str = selectedItemStyle.Render("❯ " + str + nodeIndicator)
+		str = selectedItemStyle.Render("❯ " + str)
 	} else {
-		str = "  " + str + nodeIndicator
+		str = "  " + str
 	}
 
 	fmt.Fprint(w, str)

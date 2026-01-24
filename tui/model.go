@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"time"
-
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,13 +60,12 @@ type Model struct {
 	height           int
 	currentFilter    FilterType
 	keys             KeyMap
-	lastFilter       string            // Track last filter text to detect changes
-	previewContent   string            // Current preview text
-	pendingPreview   string            // Session name waiting for debounce
-	lastPreviewKey   string            // Last session name that had preview loaded
-	restoringState   bool              // True when restoring filter text after ctrl+d
-	processInfo      map[string]string // session -> detected process
-	previewWrapWidth int               // Track last width used for preview wrapping
+	lastFilter       string // Track last filter text to detect changes
+	previewContent   string // Current preview text
+	pendingPreview   string // Session name waiting for debounce
+	lastPreviewKey   string // Last session name that had preview loaded
+	restoringState   bool   // True when restoring filter text after ctrl+d
+	previewWrapWidth int    // Track last width used for preview wrapping
 }
 
 func newModel(
@@ -96,7 +93,7 @@ func newModel(
 	// Partition items so tmux sessions appear first
 	items = partitionItemsByTmux(items)
 
-	// Create model instance first (we need to pass processInfo pointer to delegate)
+	// Create model instance
 	m := Model{
 		sessions:       sessions,
 		width:          80,
@@ -105,14 +102,13 @@ func newModel(
 		previewContent: "",
 		pendingPreview: "",
 		lastPreviewKey: "",
-		processInfo:    make(map[string]string),
 	}
 
 	// Create list with items using compact delegate
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{processInfo: &m.processInfo}
+	delegate := compactDelegate{}
 	l := list.New(items, delegate, listWidth, 24)
 	l.Title = ""               // Empty title to avoid any spacing
 	l.SetShowStatusBar(false)  // Hide item count
@@ -178,11 +174,6 @@ func (m Model) Init() tea.Cmd {
 			cmds = append(cmds, loadPreview(m.previewer, item.session))
 		}
 	}
-
-	// Schedule process detection after first render (10ms delay)
-	cmds = append(cmds, tea.Tick(10*time.Millisecond, func(time.Time) tea.Msg {
-		return StartProcessDetectionMsg{}
-	}))
 
 	return tea.Batch(cmds...)
 }

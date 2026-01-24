@@ -30,9 +30,3 @@ type RestorationCompleteMsg struct{}
 type setCursorMsg struct {
 	index int
 }
-
-type StartProcessDetectionMsg struct{}
-
-type ProcessInfoMsg struct {
-	Processes map[string]string // session name -> process type ("node", etc)
-}

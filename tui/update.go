@@ -226,21 +226,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.restoringState = false
 		return m, nil
 
-	case StartProcessDetectionMsg:
-		return m, detectAllProcesses()
-
-	case ProcessInfoMsg:
-		// Update map in-place to preserve delegate's pointer reference
-		// Clear existing entries
-		for k := range m.processInfo {
-			delete(m.processInfo, k)
-		}
-		// Copy new entries
-		for k, v := range msg.Processes {
-			m.processInfo[k] = v
-		}
-		return m, nil
-
 	case setCursorMsg:
 		// Set cursor position and load preview
 		m.list.Select(msg.index)
