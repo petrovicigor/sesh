@@ -47,7 +47,7 @@ func (t *TUI) Run() (string, error) {
 	}
 
 	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions)
-	p := tea.NewProgram(m) // Try without alt screen
+	p := tea.NewProgram(m, tea.WithAltScreen()) // Use alt screen to eliminate gaps
 
 	result, err := p.Run()
 	if err != nil {

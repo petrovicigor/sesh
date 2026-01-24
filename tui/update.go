@@ -33,13 +33,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// Split width: 40% for list, 60% for preview (with borders)
-		// Account for borders (2 chars each side) and gap
-		listWidth := (msg.Width * 4) / 10
-		previewWidth := msg.Width - listWidth - 6 // 6 for borders and gap
+		// Split width: 45% for list, 55% for preview
+		// Each box decoration: border(2) + padding(2) = 4 chars total
+		listBoxWidth := (msg.Width * 45) / 100
+		previewBoxWidth := msg.Width - listBoxWidth
 
-		m.list.SetSize(listWidth-4, msg.Height-4)      // -4 for border padding
-		m.previewPort.Width = previewWidth - 4
+		// Content width = box width - decoration (4 chars)
+		listContentWidth := listBoxWidth - 4
+		previewContentWidth := previewBoxWidth - 4
+
+		m.list.SetSize(listContentWidth, msg.Height-4)
+		m.previewPort.Width = previewContentWidth
 		m.previewPort.Height = msg.Height - 4
 
 		// Re-wrap existing preview content for new width

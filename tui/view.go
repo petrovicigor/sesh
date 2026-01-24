@@ -26,11 +26,15 @@ func (m Model) View() string {
 	title := titleStyle.Render(m.list.Title) + "\n"
 
 	// Two columns: list on left, preview on right
+	// Don't set explicit widths - let content size determine box size
 	listView := listStyle.Render(m.list.View())
 	previewView := previewStyle.Render(m.previewPort.View())
 
 	// Place side by side
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, listView, previewView)
 
-	return title + columns
+	// Constrain total width to terminal width
+	constrained := lipgloss.NewStyle().MaxWidth(m.width).Render(columns)
+
+	return title + constrained
 }

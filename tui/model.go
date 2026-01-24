@@ -112,8 +112,8 @@ func newModel(
 	previewWidth := 100
 	delegate := compactDelegate{processInfo: &m.processInfo}
 	l := list.New(items, delegate, listWidth, 24)
-	l.Title = "Sesh Sessions"
-	l.SetShowStatusBar(false) // Hide item count
+	l.Title = ""               // Empty title to avoid any spacing
+	l.SetShowStatusBar(false)  // Hide item count
 	l.SetShowPagination(false)
 	l.SetFilteringEnabled(true)
 	l.SetShowTitle(false) // Hide default title, we'll render custom one
@@ -143,9 +143,8 @@ func newModel(
 	styles.FilterCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
 	l.Styles = styles
 
-	// Remove "Filter:" text, just show cursor
+	// Remove filter input prompt entirely
 	l.FilterInput.Prompt = ""
-	l.FilterInput.PromptStyle = styles.FilterPrompt
 
 	// Complete model initialization with remaining fields
 	m.lister = lister
