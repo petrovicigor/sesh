@@ -405,22 +405,18 @@ func partitionItemsByTmux(items []list.Item) []list.Item {
 		return items
 	}
 
-	tmuxItems := make([]list.Item, 0, len(items))
-	otherItems := make([]list.Item, 0, len(items))
+	result := make([]list.Item, 0, len(items))
+	otherItems := make([]list.Item, 0, len(items)/2)
 
 	for _, item := range items {
 		if sessionItem, ok := item.(sessionItem); ok {
 			if sessionItem.session.Src == "tmux" {
-				tmuxItems = append(tmuxItems, item)
+				result = append(result, item)
 			} else {
 				otherItems = append(otherItems, item)
 			}
 		}
 	}
 
-	// Concatenate: tmux first, then others
-	result := make([]list.Item, 0, len(items))
-	result = append(result, tmuxItems...)
-	result = append(result, otherItems...)
-	return result
+	return append(result, otherItems...)
 }
