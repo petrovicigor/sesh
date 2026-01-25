@@ -14,6 +14,21 @@ import (
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
+// isRecreatable checks if a session can be recreated (exists in persistent sources)
+// Returns true if found in config, projects, or tmuxinator (not just zoxide)
+func isRecreatable(l lister.Lister, name string) bool {
+	if _, exists := l.FindConfigSession(name); exists {
+		return true
+	}
+	if _, exists := l.FindProjectSession(name); exists {
+		return true
+	}
+	if _, exists := l.FindTmuxinatorConfig(name); exists {
+		return true
+	}
+	return false
+}
+
 func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.Connector) *cobra.Command {
 	return &cobra.Command{
 		Use:     "last",
@@ -93,7 +108,8 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 			for _, entry := range sortedRecent {
 				if !currentExists || entry.name != currentSession.Name {
 					// Track the first candidate as fallback (for recreating killed sessions)
-					if fallbackSession == "" {
+					// Only use recreatable sessions (config/projects/tmuxinator, not zoxide-only)
+					if fallbackSession == "" && isRecreatable(l, entry.name) {
 						fallbackSession = entry.name
 					}
 					// Prefer sessions that still exist in tmux
