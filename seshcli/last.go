@@ -22,6 +22,14 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 		RunE: func(cmd *cobra.Command, args []string) error {
 			isAttached := t.IsAttached()
 
+			// Ensure tmux server is running before attempting attach operations
+			// This handles the case where server was killed (tkill/tmux kill-server)
+			if !isAttached {
+				if err := t.StartServer(); err != nil {
+					// Non-fatal: some operations may still work
+				}
+			}
+
 			// FAST PATH: Try to get current session name without full list
 			currentName := ""
 			if isAttached {

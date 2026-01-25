@@ -22,6 +22,7 @@ type Tmux interface {
 	NextWindowInSession(sessionName string) (string, error)
 	SwitchOrAttach(name string, opts model.ConnectOpts) (string, error)
 	KillSession(name string) (string, error)
+	StartServer() error
 }
 
 type RealTmux struct {
@@ -79,4 +80,9 @@ func (t *RealTmux) GetCurrentSessionName() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(name), nil
+}
+
+func (t *RealTmux) StartServer() error {
+	_, err := t.shell.Cmd("tmux", "start-server")
+	return err
 }

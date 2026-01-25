@@ -34,5 +34,9 @@ func connectToTmux(c *RealConnector, connection model.Connection, opts model.Con
 			c.startup.Exec(connection.Session)
 		}
 	}
+	// Ensure server is running before switch/attach
+	// This handles edge case where new-session succeeded but server
+	// state is inconsistent
+	_ = c.tmux.StartServer()
 	return c.tmux.SwitchOrAttach(connection.Session.Name, opts)
 }
