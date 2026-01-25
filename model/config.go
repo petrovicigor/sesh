@@ -46,6 +46,7 @@ type (
 		IncludeWorktrees bool           `toml:"include_worktrees"`
 		Exclude          []string       `toml:"exclude"`
 		Saved            []SavedProject `toml:"saved"`
+		StartupCommand   string         `toml:"startup_command"`
 	}
 
 	SavedProject struct {
