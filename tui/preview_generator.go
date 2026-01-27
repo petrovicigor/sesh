@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -207,11 +208,17 @@ func getDirectoryTree(path string, isActive bool) string {
 }
 
 // dimANSI adds dim attribute to ANSI color codes
+// Matches bash: sed $'s/\033\\[m/\033[0;2m/g; s/\033\\[\\([1-9][0-9;]*\\)m/\033[2;\\1m/g'
 func dimANSI(s string) string {
 	// Replace \033[m with \033[0;2m (reset with dim)
 	s = strings.ReplaceAll(s, "\033[m", "\033[0;2m")
+
 	// Add dim (2) to existing color codes: \033[31m -> \033[2;31m
-	// This is a simplified version - the bash script has more complex regex
+	// Pattern: ESC[<numbers>m where numbers start with 1-9
+	// Use \x1b (hex) for escape sequence, ${1} for proper backreference
+	re := regexp.MustCompile(`\x1b\[([1-9][0-9;]*)m`)
+	s = re.ReplaceAllString(s, "\x1b[2;${1}m")
+
 	return s
 }
 
@@ -266,6 +273,7 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 		END AS compact_time_ago
 	FROM sessions
 	WHERE tmux_session = ?
+	  AND replaced_by_session_id IS NULL
 	ORDER BY
 		CASE
 			WHEN (ended_at IS NULL) AND (pinned_at IS NOT NULL) THEN 4
@@ -291,8 +299,8 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 			hasRows = true
 		}
 
-		var sessionID, title, lastActivity, status, startedAt, timeAgo, createdAgo, compactTimeAgo string
-		var endedAt, gitBranch, pinnedAt sql.NullString
+		var sessionID, title, lastActivity, startedAt, timeAgo, createdAgo, compactTimeAgo string
+		var endedAt, gitBranch, pinnedAt, status sql.NullString
 		var pid, compactionCount sql.NullInt64
 		var compactedAt sql.NullString
 
@@ -304,7 +312,7 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 		}
 
 		sessionLine := formatClaudeSession(
-			title, endedAt.Valid, pid.Int64, status, timeAgo, createdAgo,
+			title, endedAt.Valid, pid.Int64, status.String, timeAgo, createdAgo,
 			compactedAt.Valid, int(compactionCount.Int64), compactTimeAgo,
 			gitBranch.String, pinnedAt.Valid, isActive,
 		)

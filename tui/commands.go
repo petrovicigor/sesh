@@ -71,19 +71,31 @@ func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText 
 
 func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 	return func() tea.Msg {
-		// Determine if this is an active tmux session
-		isActive := (session.Src == "tmux" && session.Attached > 0)
-
-		// Use the session path
+		isActive := (session.Src == "tmux")
 		path := session.Path
 
-		// Generate rich preview if we have a path
+		// For active tmux sessions in git repos, show git info
+		if isActive && path != "" && isGitRepo(path) {
+			content := GenerateRichPreview(session.Name, path, isActive)
+			return PreviewLoadedMsg{Content: content}
+		}
+
+		// For active tmux sessions NOT in git repos, capture pane content
+		if isActive {
+			content, err := p.Preview(session.Name)
+			if err == nil && content != "" {
+				return PreviewLoadedMsg{Content: content}
+			}
+			// Fallback to rich preview if capture fails
+		}
+
+		// For non-tmux sessions, show git/directory info
 		if path != "" {
 			content := GenerateRichPreview(session.Name, path, isActive)
 			return PreviewLoadedMsg{Content: content}
 		}
 
-		// Fallback to default previewer
+		// Final fallback to default previewer
 		content, err := p.Preview(session.Name)
 		if err != nil {
 			return PreviewLoadedMsg{Content: "Error loading preview: " + err.Error()}
