@@ -46,7 +46,9 @@
       "Bash([ -f \"$dir/.git\" ])",
       "Bash(then echo \"=== $dir ===\")",
       "Bash(git -C:*)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(/Users/igorpetrovic/Projects/sesh/bin/sesh list:*)",
+      "Bash(/Users/igorpetrovic/projects/sesh/bin/sesh list:*)"
     ]
   }
 }
