@@ -93,7 +93,7 @@ func listProjects(l *RealLister) (model.SeshSessions, error) {
 		orderedIndex[i] = key
 		directory[key] = model.SeshSession{
 			Src:  "projects",
-			Name: name, // Short name for display
+			Name: name,    // Short name for display
 			Path: dirPath, // Full path for connection
 		}
 	}

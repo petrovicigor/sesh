@@ -41,12 +41,13 @@ type (
 	}
 
 	ProjectsConfig struct {
-		Paths            []string       `toml:"paths"`
-		MaxDepth         int            `toml:"max_depth"`
-		IncludeWorktrees bool           `toml:"include_worktrees"`
-		Exclude          []string       `toml:"exclude"`
-		Saved            []SavedProject `toml:"saved"`
-		StartupCommand   string         `toml:"startup_command"`
+		Paths             []string       `toml:"paths"`
+		MaxDepth          int            `toml:"max_depth"`
+		IncludeWorktrees  bool           `toml:"include_worktrees"`
+		Exclude           []string       `toml:"exclude"`
+		Saved             []SavedProject `toml:"saved"`
+		StartupCommand    string         `toml:"startup_command"`
+		GitStartupCommand string         `toml:"git_startup_command"`
 	}
 
 	SavedProject struct {
