@@ -12,6 +12,7 @@ type KeyMap struct {
 	ToggleZoxide     key.Binding
 	Delete           key.Binding
 	GoToWorktreeRoot key.Binding
+	DetectProcesses  key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -50,5 +51,9 @@ var DefaultKeyMap = KeyMap{
 	GoToWorktreeRoot: key.NewBinding(
 		key.WithKeys("ctrl+0"),
 		key.WithHelp("ctrl+0", "go to worktree root"),
+	),
+	DetectProcesses: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "detect processes"),
 	),
 }

@@ -60,12 +60,13 @@ type Model struct {
 	height           int
 	currentFilter    FilterType
 	keys             KeyMap
-	lastFilter       string // Track last filter text to detect changes
-	previewContent   string // Current preview text
-	pendingPreview   string // Session name waiting for debounce
-	lastPreviewKey   string // Last session name that had preview loaded
-	restoringState   bool   // True when restoring filter text after ctrl+d
-	previewWrapWidth int    // Track last width used for preview wrapping
+	lastFilter       string            // Track last filter text to detect changes
+	previewContent   string            // Current preview text
+	pendingPreview   string            // Session name waiting for debounce
+	lastPreviewKey   string            // Last session name that had preview loaded
+	restoringState   bool              // True when restoring filter text after ctrl+d
+	processInfo      map[string]string // session -> detected process
+	previewWrapWidth int               // Track last width used for preview wrapping
 }
 
 func newModel(
@@ -93,7 +94,7 @@ func newModel(
 	// Partition items so tmux sessions appear first
 	items = partitionItemsByTmux(items)
 
-	// Create model instance
+	// Create model instance first (we need to pass processInfo pointer to delegate)
 	m := Model{
 		sessions:       sessions,
 		width:          80,
@@ -102,19 +103,20 @@ func newModel(
 		previewContent: "",
 		pendingPreview: "",
 		lastPreviewKey: "",
+		processInfo:    make(map[string]string),
 	}
 
 	// Create list with items using compact delegate
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{}
+	delegate := compactDelegate{processInfo: &m.processInfo}
 	l := list.New(items, delegate, listWidth, 24)
-	l.Title = ""               // Empty title to avoid any spacing
+	l.Title = "⚡ Sesh Sessions" // Set initial title
 	l.SetShowStatusBar(false)  // Hide item count
 	l.SetShowPagination(false)
 	l.SetFilteringEnabled(true)
-	l.SetShowTitle(false) // Hide default title, we'll render custom one
+	l.SetShowTitle(true) // Show title (we'll update it dynamically for process indicator)
 	l.SetShowHelp(false)  // Hide help to keep UI clean
 
 	// Use custom filter that groups tmux sessions first
@@ -131,7 +133,7 @@ func newModel(
 	listKeys.CursorUp.SetKeys("up", "ctrl+p")
 	listKeys.CursorDown.SetKeys("down", "ctrl+n")
 	// Clear accept/cancel filter keys so arrows don't exit filter mode
-	listKeys.AcceptWhileFiltering.SetKeys("enter", "tab")
+	listKeys.AcceptWhileFiltering.SetKeys("enter")
 	listKeys.CancelWhileFiltering.SetKeys("esc", "ctrl+c", "ctrl+b")
 	l.KeyMap = listKeys
 
@@ -139,9 +141,15 @@ func newModel(
 	styles := list.DefaultStyles()
 	styles.FilterPrompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	styles.FilterCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
+	// Make title visible with bold and color
+	styles.Title = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("170")).
+		MarginBottom(1).
+		MarginLeft(2)
 	l.Styles = styles
 
-	// Remove filter input prompt entirely
+	// Remove filter input prompt (will be set temporarily for indicator)
 	l.FilterInput.Prompt = ""
 
 	// Complete model initialization with remaining fields

@@ -226,6 +226,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.restoringState = false
 		return m, nil
 
+	case ProcessInfoMsg:
+		logDebug("DEBUG: ProcessInfoMsg received with %d processes", len(msg.Processes))
+		// Update map in-place to preserve delegate's pointer reference
+		// Clear existing entries
+		for k := range m.processInfo {
+			delete(m.processInfo, k)
+		}
+		// Copy new entries
+		for k, v := range msg.Processes {
+			m.processInfo[k] = v
+			logDebug("DEBUG: Process detected - session: %s, process: %s", k, v)
+		}
+
+		// Process detection complete
+		logDebug("DEBUG: Process detection complete, %d processes found", len(msg.Processes))
+		return m, nil
+
 	case setCursorMsg:
 		// Set cursor position and load preview
 		m.list.Select(msg.index)
@@ -236,6 +253,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle Tab key explicitly FIRST (before any other checks)
+		if msg.Type == tea.KeyTab {
+			logDebug("DEBUG: Tab key detected (KeyTab type)")
+			return m, detectAllProcesses()
+		}
+
 		// Handle quit/select/filter keys first
 		switch {
 		case key.Matches(msg, m.keys.Quit):
@@ -324,12 +347,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+
+		case key.Matches(msg, m.keys.DetectProcesses):
+			// Trigger process detection when Tab is pressed
+			logDebug("DEBUG: Tab key pressed, triggering process detection")
+			return m, detectAllProcesses()
 		}
 
-		// When filtering, intercept arrow keys and handle them ourselves
+		// When filtering, intercept arrow keys and Tab and handle them ourselves
 		// This prevents the list from exiting filter mode
 		if m.list.FilterState() == list.Filtering {
 			switch msg.String() {
+			case "tab":
+				// Trigger process detection when Tab is pressed
+				logDebug("DEBUG: Tab key pressed in filtering mode, triggering process detection")
+				return m, detectAllProcesses()
 			case "up":
 				m.list.CursorUp()
 				// Load preview for newly selected session with cache/debounce
