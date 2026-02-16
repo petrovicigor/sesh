@@ -265,6 +265,23 @@ To add a new source following this pattern:
 - **Name/Path separation**: Sources that show shortened names must implement a `Find*Session()` method for path resolution
 - **Shell integration**: External scripts should use `sesh path` command rather than parsing display strings or hardcoding paths
 
+### Troubleshooting: Binary Doesn't Work After Rebuild
+
+If `sesh list` produces no output or crashes after rebuilding, it's likely a **macOS code signature cache issue**. When you overwrite a binary in-place (via `go build -o` or `cp`), macOS may cache the old code signature and silently fail to run the new binary.
+
+**Fix**: Remove the old binary first, then build/copy:
+
+```bash
+rm ~/dotfiles/bin/sesh
+CGO_ENABLED=1 go build -ldflags "-X 'main.version=$(git describe --tags --abbrev=0)'" -o ~/dotfiles/bin/sesh
+chmod +x ~/dotfiles/bin/sesh
+```
+
+**Key points:**
+- `CGO_ENABLED=1` is required because of the `go-sqlite3` dependency
+- Always `rm` before writing the new binary — `cp` over an existing file keeps the same inode and macOS doesn't re-validate the code signature
+- `~/bin` is a symlink to `~/dotfiles/bin`, so both paths refer to the same file
+
 ### Performance Debugging
 
 **Timing instrumentation** is built into `lister/list.go:56-58`:

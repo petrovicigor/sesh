@@ -244,13 +244,26 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 		session_id, custom_title, last_activity, ended_at, pid, status,
 		compacted_at, compaction_count, started_at, git_branch, pinned_at,
 		CASE
-			WHEN (strftime('%s', 'now') - strftime('%s', last_activity)) < 60 THEN 'now'
-			WHEN (strftime('%s', 'now') - strftime('%s', last_activity)) < 3600 THEN
-				CAST((strftime('%s', 'now') - strftime('%s', last_activity)) / 60 AS TEXT) || 'm'
-			WHEN (strftime('%s', 'now') - strftime('%s', last_activity)) < 86400 THEN
-				CAST((strftime('%s', 'now') - strftime('%s', last_activity)) / 3600 AS TEXT) || 'h'
+			WHEN ended_at IS NULL THEN
+				CASE
+					WHEN (strftime('%s', 'now') - strftime('%s', COALESCE(last_activity, started_at))) < 60 THEN 'now'
+					WHEN (strftime('%s', 'now') - strftime('%s', COALESCE(last_activity, started_at))) < 3600 THEN
+						CAST((strftime('%s', 'now') - strftime('%s', COALESCE(last_activity, started_at))) / 60 AS TEXT) || 'm'
+					WHEN (strftime('%s', 'now') - strftime('%s', COALESCE(last_activity, started_at))) < 86400 THEN
+						CAST((strftime('%s', 'now') - strftime('%s', COALESCE(last_activity, started_at))) / 3600 AS TEXT) || 'h'
+					ELSE
+						CAST((strftime('%s', 'now') - strftime('%s', COALESCE(last_activity, started_at))) / 86400 AS TEXT) || 'd'
+				END
 			ELSE
-				CAST((strftime('%s', 'now') - strftime('%s', last_activity)) / 86400 AS TEXT) || 'd'
+				CASE
+					WHEN (strftime('%s', 'now') - strftime('%s', ended_at)) < 60 THEN 'now'
+					WHEN (strftime('%s', 'now') - strftime('%s', ended_at)) < 3600 THEN
+						CAST((strftime('%s', 'now') - strftime('%s', ended_at)) / 60 AS TEXT) || 'm'
+					WHEN (strftime('%s', 'now') - strftime('%s', ended_at)) < 86400 THEN
+						CAST((strftime('%s', 'now') - strftime('%s', ended_at)) / 3600 AS TEXT) || 'h'
+					ELSE
+						CAST((strftime('%s', 'now') - strftime('%s', ended_at)) / 86400 AS TEXT) || 'd'
+				END
 		END AS time_ago,
 		CASE
 			WHEN (strftime('%s', 'now') - strftime('%s', started_at)) < 60 THEN 'now'
