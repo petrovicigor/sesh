@@ -65,8 +65,7 @@ type Model struct {
 	pendingPreview   string            // Session name waiting for debounce
 	lastPreviewKey   string            // Last session name that had preview loaded
 	restoringState   bool              // True when restoring filter text after ctrl+d
-	processInfo      map[string]string // session -> detected process
-	previewWrapWidth int               // Track last width used for preview wrapping
+	processInfo map[string]string // session -> detected process
 }
 
 func newModel(

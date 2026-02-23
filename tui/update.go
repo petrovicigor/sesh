@@ -6,25 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 )
-
-// truncatePreviewContent truncates lines that exceed maxWidth without padding.
-// Unlike lipgloss.Width() which both wraps AND pads (amplifying width miscalculations
-// for ANSI codes and Nerd Font characters), this only truncates, avoiding the
-// cascading width overflow that corrupts the TUI layout.
-func truncatePreviewContent(content string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return content
-	}
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if ansi.StringWidth(line) > maxWidth {
-			lines[i] = ansi.Truncate(line, maxWidth, "…")
-		}
-	}
-	return strings.Join(lines, "\n")
-}
 
 // loadPreviewDebounced handles preview loading with debouncing
 // Returns updated model and command to execute
@@ -63,14 +45,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewPort.Width = previewContentWidth
 		m.previewPort.Height = msg.Height - 4
 
-		// Re-truncate existing preview content for new width
+		// Re-set preview content (viewport handles width/truncation)
 		if m.previewContent != "" {
-			// Only update wrap width if changed
-			if m.previewPort.Width != m.previewWrapWidth {
-				m.previewWrapWidth = m.previewPort.Width
-			}
-			truncated := truncatePreviewContent(m.previewContent, m.previewWrapWidth)
-			m.previewPort.SetContent(truncated)
+			m.previewPort.SetContent(m.previewContent)
 		}
 
 		return m, nil
@@ -212,15 +189,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PreviewLoadedMsg:
 		m.previewContent = msg.Content
-		// Only recreate wrap style if width changed
-		if m.previewPort.Width != m.previewWrapWidth {
-			m.previewWrapWidth = m.previewPort.Width
-		}
-		// Truncate long lines instead of lipgloss Width() wrapping.
-		// Width() both wraps AND pads, which amplifies width miscalculations
-		// for ANSI codes and special Unicode chars, causing terminal overflow.
-		truncated := truncatePreviewContent(msg.Content, m.previewWrapWidth)
-		m.previewPort.SetContent(truncated)
+		// Let the viewport handle width/truncation directly —
+		// no pre-wrapping with lipgloss.Width() which was double-processing
+		// and amplifying width miscalculations for ANSI/emoji content.
+		m.previewPort.SetContent(msg.Content)
 		return m, nil
 
 	case DebounceTickMsg:

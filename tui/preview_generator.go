@@ -394,7 +394,7 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		} else if statusType == "running" {
 			statusDisplay = fmt.Sprintf("%s🔧 %s%s ", yellow, toolName, colorReset)
 		} else if statusType == "awaiting" {
-			statusDisplay = fmt.Sprintf("%s🖐 %s%s ", magenta, toolName, colorReset)
+			statusDisplay = fmt.Sprintf("%s🖐️ %s%s ", magenta, toolName, colorReset)
 		}
 	}
 

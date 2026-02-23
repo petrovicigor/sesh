@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/joshmedeski/sesh/v2/model"
 )
 
@@ -126,116 +124,5 @@ func TestPartitionItemsByTmux(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestPreviewWidthCaching(t *testing.T) {
-	tests := []struct {
-		name              string
-		initialWidth      int
-		viewportWidth     int
-		msg               tea.Msg
-		expectedWrapWidth int
-	}{
-		{
-			name:          "PreviewLoadedMsg updates wrap width when viewport width differs",
-			initialWidth:  0,
-			viewportWidth: 100,
-			msg: PreviewLoadedMsg{
-				Content: "test content",
-			},
-			expectedWrapWidth: 100, // Should update to match viewport width
-		},
-		{
-			name:          "PreviewLoadedMsg updates wrap width when cached width differs",
-			initialWidth:  80,
-			viewportWidth: 100,
-			msg: PreviewLoadedMsg{
-				Content: "test content",
-			},
-			expectedWrapWidth: 100, // Should update to match viewport width
-		},
-		{
-			name:          "PreviewLoadedMsg preserves wrap width when it matches viewport",
-			initialWidth:  100,
-			viewportWidth: 100,
-			msg: PreviewLoadedMsg{
-				Content: "test content",
-			},
-			expectedWrapWidth: 100, // Should stay the same
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create minimal model with preview port and list
-			m := Model{
-				list:             list.New([]list.Item{}, compactDelegate{}, 60, 24),
-				previewPort:      viewport.New(tt.viewportWidth, 24),
-				previewWrapWidth: tt.initialWidth,
-				previewContent:   "",
-				sessions: model.SeshSessions{
-					Directory:    make(map[string]model.SeshSession),
-					OrderedIndex: []string{},
-				},
-			}
-
-			// Update model with message
-			updatedModel, _ := m.Update(tt.msg)
-			m = updatedModel.(Model)
-
-			// Verify wrap width was set correctly
-			if m.previewWrapWidth != tt.expectedWrapWidth {
-				t.Errorf("expected previewWrapWidth=%d, got %d", tt.expectedWrapWidth, m.previewWrapWidth)
-			}
-		})
-	}
-}
-
-func TestPreviewWidthCachingWithContent(t *testing.T) {
-	// Create model with initial content and width
-	m := Model{
-		list:             list.New([]list.Item{}, compactDelegate{}, 60, 24),
-		previewPort:      viewport.New(80, 24),
-		previewWrapWidth: 80,
-		previewContent:   "initial content",
-		sessions: model.SeshSessions{
-			Directory:    make(map[string]model.SeshSession),
-			OrderedIndex: []string{},
-		},
-	}
-
-	// First preview load - viewport width matches cached width, should stay the same
-	msg1 := PreviewLoadedMsg{Content: "new content 1"}
-	updatedModel, _ := m.Update(msg1)
-	m = updatedModel.(Model)
-
-	if m.previewWrapWidth != 80 {
-		t.Errorf("expected previewWrapWidth to stay at 80, got %d", m.previewWrapWidth)
-	}
-	if m.previewContent != "new content 1" {
-		t.Errorf("expected previewContent to update, got %q", m.previewContent)
-	}
-
-	// Second preview load - should still use cached width
-	msg2 := PreviewLoadedMsg{Content: "new content 2"}
-	updatedModel, _ = m.Update(msg2)
-	m = updatedModel.(Model)
-
-	if m.previewWrapWidth != 80 {
-		t.Errorf("expected previewWrapWidth to stay at 80, got %d", m.previewWrapWidth)
-	}
-	if m.previewContent != "new content 2" {
-		t.Errorf("expected previewContent to update, got %q", m.previewContent)
-	}
-
-	// Window resize - should update cached width
-	msg3 := tea.WindowSizeMsg{Width: 200, Height: 50}
-	updatedModel, _ = m.Update(msg3)
-	m = updatedModel.(Model)
-
-	expectedWidth := (200*55)/100 - 4 // 106
-	if m.previewWrapWidth != expectedWidth {
-		t.Errorf("expected previewWrapWidth to update to %d, got %d", expectedWidth, m.previewWrapWidth)
 	}
 }
