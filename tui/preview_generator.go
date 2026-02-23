@@ -118,12 +118,17 @@ func GenerateRichPreview(sessionName string, path string, isActive bool) string 
 
 func isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
-	if _, err := os.Stat(gitDir); err == nil {
-		return true
+	info, err := os.Stat(gitDir)
+	if err != nil {
+		return false
 	}
-	// Check if we're in a git repo by running git command
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
-	return cmd.Run() == nil
+	// .git directory without index = bare repo, skip it
+	if info.IsDir() {
+		if _, err := os.Stat(filepath.Join(gitDir, "index")); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func getGitBranch(path string) string {
@@ -385,11 +390,11 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		}
 
 		if status == "thinking" {
-			statusDisplay = fmt.Sprintf(" %s💭%s", yellow, colorReset)
+			statusDisplay = fmt.Sprintf("%s🔮%s ", yellow, colorReset)
 		} else if statusType == "running" {
-			statusDisplay = fmt.Sprintf(" %s⚙️ %s%s", yellow, toolName, colorReset)
+			statusDisplay = fmt.Sprintf("%s🔧 %s%s ", yellow, toolName, colorReset)
 		} else if statusType == "awaiting" {
-			statusDisplay = fmt.Sprintf(" %s⏳ %s%s", magenta, toolName, colorReset)
+			statusDisplay = fmt.Sprintf("%s🖐 %s%s ", magenta, toolName, colorReset)
 		}
 	}
 
@@ -440,7 +445,7 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		timeAgo = "1m"
 	}
 
-	return fmt.Sprintf(" %s %s%s%s%s%s %s%s%s%s%s%s%s",
-		statusIcon, pinIndicator, titleColor, title, colorReset, branchDisplay,
-		colorDim, timeAgo, colorReset, ageDisplay, compactDisplay, statusDisplay, staleDisplay)
+	return fmt.Sprintf(" %s %s%s%s%s%s%s %s%s%s%s%s%s",
+		statusIcon, statusDisplay, pinIndicator, titleColor, title, colorReset, branchDisplay,
+		colorDim, timeAgo, colorReset, ageDisplay, compactDisplay, staleDisplay)
 }
