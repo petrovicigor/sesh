@@ -241,20 +241,18 @@ func newModel(
 func (m Model) Init() tea.Cmd {
 	logDebug("Init() called with %d sessions", len(m.sessions.OrderedIndex))
 
-	// Start with filter active and load preview for first session
-	cmds := []tea.Cmd{
-		func() tea.Msg {
-			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-		},
+	// Enter filter mode asynchronously (allows typing to filter immediately)
+	filterCmd := func() tea.Msg {
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
 	}
 
 	// Load preview for first item if available
 	if m.list.SelectedItem() != nil {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			logDebug("Init: queuing preview load for %q", item.session.Name)
-			cmds = append(cmds, loadPreview(m.previewer, item.session))
+			return tea.Batch(filterCmd, loadPreview(m.previewer, item.session))
 		}
 	}
 
-	return tea.Batch(cmds...)
+	return filterCmd
 }

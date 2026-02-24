@@ -21,6 +21,7 @@ var (
 	defaultStarStr     = defaultStarStyle.Render("★")              // Pre-rendered gold star
 	treeMidStr         = treeConnStyle.Render("│")                 // Pre-rendered connector
 	treeEndStr         = treeConnStyle.Render("└")                 // Pre-rendered last connector
+	bareRootStr        = treeConnStyle.Render("(bare root)")       // Pre-rendered bare repo label
 )
 
 // extractIconPrefix derives the ANSI icon prefix from a pre-computed displayName.
@@ -76,9 +77,14 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			}
 		}
 
+		// Bare repo root — always show as "name (bare root)"
+		if v.bareRoot {
+			str = v.iconPrefix + v.session.Name + " " + bareRootStr
+		}
+
 		// When group is expanded, show short branch names for dormant items
 		// and default star indicator for the default branch
-		if d.expandedGroup != nil && *d.expandedGroup != "" &&
+		if !v.bareRoot && d.expandedGroup != nil && *d.expandedGroup != "" &&
 			strings.Contains(v.session.Name, "/") {
 			repoName := strings.SplitN(v.session.Name, "/", 2)[0]
 			if repoName == *d.expandedGroup && v.groupRepo == "" {

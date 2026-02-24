@@ -44,10 +44,15 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	*m.expandedGroup = repoName
 	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup)
 
-	m.list.ResetFilter()
+	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
 	m.list.Filter = tmuxFirstFilter(displayItems)
+	m.list.SetFilterText("")
+	m.list.SetFilterState(list.Filtering)
+	// SetFilterState doesn't call updatePagination(), but it changes titleView()
+	// height (filter input vs title). Force recalculation to prevent 1-line jump.
+	m.list.SetSize(m.list.Width(), m.list.Height())
 
 	// Find cursor target: first newly-revealed item from this group.
 	// For active groups: first dormant (non-tmux) child after the badge carrier.
@@ -91,22 +96,16 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	}
 found:
 	logDebug("DEBUG expandGroup: repoName=%s targetIndex=%d totalItems=%d", repoName, targetIndex, len(displayItems))
-
-	// Enter filter mode synchronously (no message round-trip, no jitter)
-	m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m.list.Select(targetIndex)
-
-	// Force clean redraw (item count changed, prevents terminal misalignment)
-	cmds := []tea.Cmd{tea.ClearScreen}
 
 	// Load preview for target item
 	if targetIndex < len(displayItems) {
 		if item, ok := displayItems[targetIndex].(sessionItem); ok {
 			m.previewPort.SetContent("")
-			cmds = append(cmds, loadPreview(m.previewer, item.session))
+			return m, loadPreview(m.previewer, item.session)
 		}
 	}
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
 // collapseGroup collapses any expanded group back to its single-line form.
@@ -128,10 +127,15 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	*m.expandedGroup = ""
 	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
 
-	m.list.ResetFilter()
+	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
 	m.list.Filter = tmuxFirstFilter(displayItems)
+	m.list.SetFilterText("")
+	m.list.SetFilterState(list.Filtering)
+	// SetFilterState doesn't call updatePagination(), but it changes titleView()
+	// height (filter input vs title). Force recalculation to prevent 1-line jump.
+	m.list.SetSize(m.list.Width(), m.list.Height())
 
 	// Find the group item or badged session to position cursor on
 	targetIndex := 0
@@ -147,21 +151,15 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	}
 	m.previewPort.SetContent("")
 	m.previewContent = ""
-
-	// Enter filter mode synchronously (no message round-trip, no jitter)
-	m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 	m.list.Select(targetIndex)
-
-	// Force clean redraw (item count changed, prevents terminal misalignment)
-	cmds := []tea.Cmd{tea.ClearScreen}
 
 	// Load preview for target item
 	if targetIndex < len(displayItems) {
 		if item, ok := displayItems[targetIndex].(sessionItem); ok {
-			cmds = append(cmds, loadPreview(m.previewer, item.session))
+			return m, loadPreview(m.previewer, item.session)
 		}
 	}
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

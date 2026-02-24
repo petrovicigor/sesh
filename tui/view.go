@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -48,6 +50,13 @@ func (m Model) View() string {
 
 	// Constrain total width to terminal width
 	constrained := constrainedStyle.MaxWidth(m.width).Render(columns)
+
+	// Pad to fixed terminal height so the renderer always diffs the same
+	// number of lines — prevents jitter when item count changes (expand/collapse).
+	renderedLines := strings.Count(constrained, "\n") + 1
+	if renderedLines < m.height {
+		constrained += strings.Repeat("\n", m.height-renderedLines)
+	}
 
 	if viewCount <= 3 {
 		logDebug("View() call #%d rendered", viewCount)

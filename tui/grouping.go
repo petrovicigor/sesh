@@ -146,6 +146,25 @@ func formatDormantBadge(dormantCount int) string {
 	return fmt.Sprintf(" \033[240m(+%d)\033[39m", dormantCount)
 }
 
+// sortBareRootFirst reorders children so the bare repo root (name without "/")
+// appears first in the expanded list.
+func sortBareRootFirst(children []sessionItem, repoName string) []sessionItem {
+	for i, wt := range children {
+		if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
+			if i == 0 {
+				return children
+			}
+			// Move bare root to front
+			result := make([]sessionItem, 0, len(children))
+			result = append(result, wt)
+			result = append(result, children[:i]...)
+			result = append(result, children[i+1:]...)
+			return result
+		}
+	}
+	return children
+}
+
 // buildDisplayItems creates the list items for display, collapsing worktree groups.
 // For groups with active tmux sessions: active worktrees show individually,
 // the last active one gets a (+N) badge appended for dormant worktrees.
@@ -207,6 +226,9 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				// Add all active tmux items together
 				for _, wt := range gi.uniqueItems {
 					if group.tmuxNames[wt.session.Name] {
+						if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
+							wt.bareRoot = true
+						}
 						result = append(result, wt)
 					}
 				}
@@ -222,10 +244,13 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 
 				// If expanded, show dormant worktrees below
 				if expandedGroup == repoName {
-					dormant := dormantWorktrees(gi.uniqueItems, group.tmuxNames)
+					dormant := sortBareRootFirst(dormantWorktrees(gi.uniqueItems, group.tmuxNames), repoName)
 					for i, wt := range dormant {
 						wt.groupChild = true
 						wt.groupLastChild = (i == len(dormant)-1)
+						if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
+							wt.bareRoot = true
+						}
 						result = append(result, wt)
 					}
 				}
@@ -265,8 +290,12 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 						}
 						children = append(children, wt)
 					}
+					children = sortBareRootFirst(children, repoName)
 					for i, wt := range children {
 						wt.groupChild = true
+						if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
+							wt.bareRoot = true
+						}
 						wt.groupLastChild = (i == len(children)-1)
 						result = append(result, wt)
 					}

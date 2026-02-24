@@ -11,6 +11,7 @@ type sessionItem struct {
 	groupRepo      string // Repo name if this item carries expand/collapse for a group
 	groupChild     bool   // True if this is an expanded child of a worktree group
 	groupLastChild bool   // True if this is the last expanded child (for └ connector)
+	bareRoot       bool   // True if this is the bare repo root of a worktree group
 }
 
 // Title returns the display name shown in the list
