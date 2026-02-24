@@ -29,6 +29,18 @@ func (m Model) loadPreviewDebounced(item sessionItem) (Model, tea.Cmd) {
 // expandGroup expands a worktree group, showing its dormant worktrees.
 // Returns updated model and commands to re-enter filter mode with preview.
 func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
+	// When all items are already visible (no dormant worktrees),
+	// just toggle the star indicator — no item rebuild or cursor change needed.
+	group := m.worktreeGroups[repoName]
+	if group != nil {
+		unique := deduplicateWorktrees(group)
+		dormant := dormantWorktrees(unique, group.tmuxNames)
+		if len(dormant) == 0 {
+			*m.expandedGroup = repoName
+			return m, nil
+		}
+	}
+
 	*m.expandedGroup = repoName
 	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup)
 
@@ -40,7 +52,6 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	// Find cursor target: first newly-revealed item from this group.
 	// For active groups: first dormant (non-tmux) child after the badge carrier.
 	// For dormant-only groups: first child after the group header.
-	group := m.worktreeGroups[repoName]
 	targetIndex := 0
 	foundBadgeOrHeader := false
 	for i, listItem := range displayItems {
@@ -102,6 +113,18 @@ found:
 // Returns updated model and command to re-enter filter mode.
 func (m Model) collapseGroup() (Model, tea.Cmd) {
 	groupRepo := *m.expandedGroup
+
+	// When all items were already visible (star-only expand), just toggle off.
+	group := m.worktreeGroups[groupRepo]
+	if group != nil {
+		unique := deduplicateWorktrees(group)
+		dormant := dormantWorktrees(unique, group.tmuxNames)
+		if len(dormant) == 0 {
+			*m.expandedGroup = ""
+			return m, nil
+		}
+	}
+
 	*m.expandedGroup = ""
 	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
 
@@ -144,7 +167,7 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		logTiming("WindowSizeMsg: %dx%d", msg.Width, msg.Height)
+		logDebug("WindowSizeMsg: %dx%d", msg.Width, msg.Height)
 		m.width = msg.Width
 		m.height = msg.Height
 
@@ -314,7 +337,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
-		logTiming("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
+		logDebug("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
 		m.previewContent = msg.Content
 		// Let the viewport handle width/truncation directly —
 		// no pre-wrapping with lipgloss.Width() which was double-processing
@@ -403,12 +426,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item.groupRepo != "" {
 					return m.expandGroup(item.groupRepo)
 				}
-				// Check if this session belongs to any worktree group
+				// Check if this session belongs to any worktree group (repo/branch format)
 				if strings.Contains(item.session.Name, "/") {
 					repoName := strings.SplitN(item.session.Name, "/", 2)[0]
 					if _, isGrouped := m.worktreeGroups[repoName]; isGrouped {
 						return m.expandGroup(repoName)
 					}
+				}
+				// Check bare repo items (no "/") that match a worktree group
+				if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
+					return m.expandGroup(item.session.Name)
 				}
 			}
 			return m, nil
@@ -470,12 +497,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Delete session if it's a tmux session
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				if item.session.Src == "tmux" {
-					logDebug("DEBUG ctrl+d: killing session=%s cursorIndex=%d expandedGroup=%q currentFilter=%d", item.session.Name, m.list.Index(), *m.expandedGroup, m.currentFilter)
+					cursorIndex := m.list.Index()
+					// Move to previous item after deletion
+					if cursorIndex > 0 {
+						cursorIndex--
+					}
+					filterText := m.list.FilterValue()
+					logDebug("DEBUG ctrl+d: killing session=%s targetIndex=%d filterText=%q expandedGroup=%q currentFilter=%d", item.session.Name, cursorIndex, filterText, *m.expandedGroup, m.currentFilter)
 					_, err := m.tmux.KillSession(item.session.Name)
 					if err == nil {
 						*m.expandedGroup = ""
-						logDebug("DEBUG ctrl+d: killed ok, reloading with filter=%d", m.currentFilter)
-						return m, loadSessionsWithFilter(m.lister, m.currentFilter)
+						logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
+						return m, loadSessionsPreservingState(m.lister, m.currentFilter, filterText, cursorIndex)
 					}
 					logDebug("DEBUG ctrl+d: kill error: %v", err)
 				}
@@ -507,54 +540,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.SetDefault):
 			// Set/clear default worktree for a repo
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				if (item.session.Src == "projects" || item.session.Src == "tmux") && strings.Contains(item.session.Name, "/") {
+			var repoName, branchName string
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				if item.session.Src != "projects" && item.session.Src != "tmux" {
+					return m, nil
+				}
+				if strings.Contains(item.session.Name, "/") {
 					parts := strings.SplitN(item.session.Name, "/", 2)
-					repoName := parts[0]
-					branchName := parts[1]
+					repoName = parts[0]
+					branchName = parts[1]
+				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
+					// Bare repo item in a worktree group — clear default
+					repoName = item.session.Name
+					branchName = ""
+				}
+			case worktreeGroupItem:
+				// Group header — clear default
+				repoName = item.repoName
+				branchName = ""
+			}
 
-					// Toggle: if already default, clear it
-					if (*m.worktreeDefaults)[repoName] == branchName {
-						delete(*m.worktreeDefaults, repoName)
-					} else {
-						(*m.worktreeDefaults)[repoName] = branchName
-					}
+			if repoName == "" {
+				return m, nil
+			}
 
-					// Rebuild groups with updated defaults
-					m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults)
-					*m.expandedGroup = ""
-					displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+			// Toggle: if already default, clear it; bare repo always clears
+			if branchName == "" || (*m.worktreeDefaults)[repoName] == branchName {
+				delete(*m.worktreeDefaults, repoName)
+			} else {
+				(*m.worktreeDefaults)[repoName] = branchName
+			}
 
-					m.list.ResetFilter()
-					m.lastFilter = "" // Prevent filter transition from overwriting items
-					m.list.SetItems(displayItems)
-					m.list.Filter = tmuxFirstFilter(displayItems)
+			// Rebuild groups with updated defaults
+			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults)
+			*m.expandedGroup = ""
+			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
 
-					// Find the group item to position cursor on
-					targetIndex := 0
-					for i, listItem := range displayItems {
-						if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
-							targetIndex = i
-							break
-						}
-					}
-					m.previewPort.SetContent("")
-					m.previewContent = ""
+			m.list.ResetFilter()
+			m.lastFilter = "" // Prevent filter transition from overwriting items
+			m.list.SetItems(displayItems)
+			m.list.Filter = tmuxFirstFilter(displayItems)
 
-					// Sequence: enter filter mode, then set cursor + async save
-					seqCmd := tea.Sequence(
-						func() tea.Msg {
-							return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-						},
-						func() tea.Msg {
-							return setCursorMsg{index: targetIndex}
-						},
-					)
-					saveCmd := saveDefaults(m.defaultsPath, *m.worktreeDefaults)
-					return m, tea.Batch(seqCmd, saveCmd)
+			// Find the group item to position cursor on
+			targetIndex := 0
+			for i, listItem := range displayItems {
+				if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
+					targetIndex = i
+					break
 				}
 			}
-			return m, nil
+			m.previewPort.SetContent("")
+			m.previewContent = ""
+
+			// Sequence: enter filter mode, then set cursor + async save
+			seqCmd := tea.Sequence(
+				func() tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+				},
+				func() tea.Msg {
+					return setCursorMsg{index: targetIndex}
+				},
+			)
+			saveCmd := saveDefaults(m.defaultsPath, *m.worktreeDefaults)
+			return m, tea.Batch(seqCmd, saveCmd)
 
 		case key.Matches(msg, m.keys.RepoFocus):
 			// Determine repo name from selected item
