@@ -14,10 +14,13 @@ import (
 var (
 	nodeIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	selectedItemStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
-	defaultStarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	nodeIndicatorStr = nodeIndicatorStyle.Render(" ⬢")  // Pre-rendered
-	filterMatchStyle = lipgloss.NewStyle().Underline(true)
-	defaultStarStr   = defaultStarStyle.Render("★")      // Pre-rendered gold star
+	defaultStarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	treeConnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	nodeIndicatorStr   = nodeIndicatorStyle.Render(" ⬢")           // Pre-rendered
+	filterMatchStyle   = lipgloss.NewStyle().Underline(true)
+	defaultStarStr     = defaultStarStyle.Render("★")              // Pre-rendered gold star
+	treeMidStr         = treeConnStyle.Render("│")                 // Pre-rendered connector
+	treeEndStr         = treeConnStyle.Render("└")                 // Pre-rendered last connector
 )
 
 // extractIconPrefix derives the ANSI icon prefix from a pre-computed displayName.
@@ -114,11 +117,21 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		return
 	}
 
+	// Add tree connector for expanded group children
+	var treePrefix string
+	if si, ok := item.(sessionItem); ok && si.groupChild {
+		if si.groupLastChild {
+			treePrefix = treeEndStr + " "
+		} else {
+			treePrefix = treeMidStr + " "
+		}
+	}
+
 	// Highlight selected item
 	if index == m.Index() {
-		str = selectedItemStyle.Render("❯ " + str + nodeIndicator)
+		str = selectedItemStyle.Render("❯ " + treePrefix + str + nodeIndicator)
 	} else {
-		str = "  " + str + nodeIndicator
+		str = "  " + treePrefix + str + nodeIndicator
 	}
 
 	fmt.Fprint(w, str)

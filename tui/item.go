@@ -4,11 +4,13 @@ import "github.com/joshmedeski/sesh/v2/model"
 
 // sessionItem implements list.Item interface for bubbles/list
 type sessionItem struct {
-	session     model.SeshSession
-	displayName string // Pre-computed with icon and ⎇ formatting
-	iconPrefix  string // Just the ANSI icon prefix (e.g., "\033[34m\033[39m ")
-	groupBadge  string // Dormant count badge (e.g., "\033[240m(+2)\033[39m") — set on last active tmux in group
-	groupRepo   string // Repo name if this item carries expand/collapse for a group
+	session        model.SeshSession
+	displayName    string // Pre-computed with icon and ⎇ formatting
+	iconPrefix     string // Just the ANSI icon prefix (e.g., "\033[34m\033[39m ")
+	groupBadge     string // Dormant count badge (e.g., "\033[240m(+2)\033[39m") — set on last active tmux in group
+	groupRepo      string // Repo name if this item carries expand/collapse for a group
+	groupChild     bool   // True if this is an expanded child of a worktree group
+	groupLastChild bool   // True if this is the last expanded child (for └ connector)
 }
 
 // Title returns the display name shown in the list

@@ -415,30 +415,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle Tab for group expand/collapse
 		if key.Matches(msg, m.keys.ExpandGroup) {
-			if *m.expandedGroup != "" {
+			// Determine which group the cursor is on (if any)
+			var targetGroup string
+			switch item := m.list.SelectedItem().(type) {
+			case worktreeGroupItem:
+				targetGroup = item.repoName
+			case sessionItem:
+				if item.groupRepo != "" {
+					targetGroup = item.groupRepo
+				} else if strings.Contains(item.session.Name, "/") {
+					repo := strings.SplitN(item.session.Name, "/", 2)[0]
+					if _, isGrouped := m.worktreeGroups[repo]; isGrouped {
+						targetGroup = repo
+					}
+				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
+					targetGroup = item.session.Name
+				}
+			}
+
+			if targetGroup == "" {
+				// Not on a group item — collapse if expanded, otherwise no-op
+				if *m.expandedGroup != "" {
+					return m.collapseGroup()
+				}
+				return m, nil
+			}
+
+			if *m.expandedGroup == targetGroup {
+				// Same group — toggle collapse
 				return m.collapseGroup()
 			}
-			if item, ok := m.list.SelectedItem().(worktreeGroupItem); ok {
-				return m.expandGroup(item.repoName)
+
+			// Different group (or none expanded) — collapse old, expand new
+			if *m.expandedGroup != "" {
+				*m.expandedGroup = ""
 			}
-			// Handle any sessionItem that belongs to a worktree group
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				if item.groupRepo != "" {
-					return m.expandGroup(item.groupRepo)
-				}
-				// Check if this session belongs to any worktree group (repo/branch format)
-				if strings.Contains(item.session.Name, "/") {
-					repoName := strings.SplitN(item.session.Name, "/", 2)[0]
-					if _, isGrouped := m.worktreeGroups[repoName]; isGrouped {
-						return m.expandGroup(repoName)
-					}
-				}
-				// Check bare repo items (no "/") that match a worktree group
-				if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
-					return m.expandGroup(item.session.Name)
-				}
-			}
-			return m, nil
+			return m.expandGroup(targetGroup)
 		}
 
 		// Handle quit/select/filter keys first

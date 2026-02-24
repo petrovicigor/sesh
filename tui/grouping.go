@@ -223,7 +223,9 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				// If expanded, show dormant worktrees below
 				if expandedGroup == repoName {
 					dormant := dormantWorktrees(gi.uniqueItems, group.tmuxNames)
-					for _, wt := range dormant {
+					for i, wt := range dormant {
+						wt.groupChild = true
+						wt.groupLastChild = (i == len(dormant)-1)
 						result = append(result, wt)
 					}
 				}
@@ -253,6 +255,7 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				// If expanded, show all unique worktrees below
 				// Skip the default branch — it's already represented in the group header
 				if expandedGroup == repoName {
+					children := make([]sessionItem, 0, len(gi.uniqueItems))
 					for _, wt := range gi.uniqueItems {
 						if group.defaultBranch != "" && strings.Contains(wt.session.Name, "/") {
 							branch := strings.SplitN(wt.session.Name, "/", 2)[1]
@@ -260,6 +263,11 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 								continue
 							}
 						}
+						children = append(children, wt)
+					}
+					for i, wt := range children {
+						wt.groupChild = true
+						wt.groupLastChild = (i == len(children)-1)
 						result = append(result, wt)
 					}
 				}
