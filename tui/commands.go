@@ -124,34 +124,6 @@ func debouncePreview(sessionName string) tea.Cmd {
 	})
 }
 
-// restoreFilterMode re-enters filter mode and optionally types filter text
-func restoreFilterMode(filterText string) tea.Cmd {
-	// Create sequence: first '/', then each character of filter text, then completion message
-	cmds := make([]tea.Cmd, 0, len(filterText)+2)
-
-	// Enter filter mode
-	cmds = append(cmds, func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-	})
-
-	// Type each character of the filter text
-	if filterText != "" {
-		for _, r := range filterText {
-			r := r // capture loop variable
-			cmds = append(cmds, func() tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
-			})
-		}
-	}
-
-	// Signal restoration complete
-	cmds = append(cmds, func() tea.Msg {
-		return RestorationCompleteMsg{}
-	})
-
-	return tea.Sequence(cmds...)
-}
-
 // saveDefaults writes worktree defaults to disk asynchronously
 func saveDefaults(path string, defaults map[string]string) tea.Cmd {
 	// Copy the map to avoid concurrent access

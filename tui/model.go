@@ -106,7 +106,6 @@ type Model struct {
 	previewContent   string            // Current preview text
 	pendingPreview   string            // Session name waiting for debounce
 	lastPreviewKey   string            // Last session name that had preview loaded
-	restoringState   bool              // True when restoring filter text after ctrl+d
 	processInfo      *map[string]string       // shared with delegate (heap-allocated)
 	allItems         []list.Item              // Full item list (no groups, used for filter mode)
 	worktreeGroups   map[string]*worktreeGroup // Grouped worktrees

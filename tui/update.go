@@ -229,82 +229,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// PRESERVING STATE - from ctrl+d deletion
 			logDebug("DEBUG: Preserving state - filter=%q, cursor=%d, items=%d", msg.PreserveFilterText, msg.PreserveCursorIndex, len(items))
 
-			// Update lastFilter to prevent cursor reset on filter change detection
+			// Swap items in-place without leaving filter mode
 			m.lastFilter = msg.PreserveFilterText
+			m.list.SetFilterText(msg.PreserveFilterText)
+			m.list.SetFilterState(list.Filtering)
+			m.list.SetSize(m.list.Width(), m.list.Height())
 
-			// Set cursor position (clamped to valid range of display items)
+			// Clamp cursor to valid range
 			targetIndex := msg.PreserveCursorIndex
-			if targetIndex >= len(displayItems) {
-				targetIndex = len(displayItems) - 1
+			visibleCount := len(m.list.VisibleItems())
+			if msg.PreserveFilterText != "" && visibleCount > 0 {
+				if targetIndex >= visibleCount {
+					targetIndex = visibleCount - 1
+				}
+			} else {
+				if targetIndex >= len(displayItems) {
+					targetIndex = len(displayItems) - 1
+				}
 			}
 			if targetIndex < 0 {
 				targetIndex = 0
 			}
-			logDebug("DEBUG: Target index after clamp: %d", targetIndex)
+			m.list.Select(targetIndex)
 
-			var cmds []tea.Cmd
-
-			if msg.PreserveFilterText != "" {
-				// Had a filter - restore it
-				m.list.ResetFilter()
-				m.list.SetFilterText(msg.PreserveFilterText)
-				m.list.SetFilterState(list.Filtering)
-
-				logDebug("DEBUG: After filtering, visible items: %d", len(m.list.VisibleItems()))
-
-				// Clamp again based on filtered items
-				visibleCount := len(m.list.VisibleItems())
-				if targetIndex >= visibleCount {
-					targetIndex = visibleCount - 1
-				}
-				if targetIndex < 0 {
-					targetIndex = 0
-				}
-				logDebug("DEBUG: Will set cursor to %d for filtered list", targetIndex)
-
-				// Set restoring state to prevent any cursor resets
-				m.restoringState = true
-
-				// Use sequence to set cursor and then complete restoration
-				cmds = append(cmds, tea.Sequence(
-					// Set cursor position
-					func() tea.Msg {
-						return setCursorMsg{index: targetIndex}
-					},
-					// Clear restoration flag
-					func() tea.Msg {
-						return RestorationCompleteMsg{}
-					},
-				))
-				cmds = append(cmds, tea.ClearScreen)
-			} else {
-				// No filter - restore cursor position AFTER entering filter mode
-				m.list.ResetFilter()
-
-				logDebug("DEBUG: Will set cursor to %d for no-filter case", targetIndex)
-
-				// Set restoring state flag to prevent cursor resets
-				m.restoringState = true
-
-				// Use sequence to ensure cursor is set AFTER filter mode is entered
-				cmds = append(cmds, tea.Sequence(
-					// First, enter filter mode
-					func() tea.Msg {
-						return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-					},
-					// Then set cursor position
-					func() tea.Msg {
-						return setCursorMsg{index: targetIndex}
-					},
-					// Finally, clear restoration flag
-					func() tea.Msg {
-						return RestorationCompleteMsg{}
-					},
-				))
-				cmds = append(cmds, tea.ClearScreen)
+			// Load preview for selected item
+			var previewCmd tea.Cmd
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				m.previewPort.SetContent("")
+				previewCmd = loadPreview(m.previewer, item.session)
 			}
-
-			return m, tea.Batch(cmds...)
+			return m, previewCmd
 		}
 
 		// NOT preserving - normal reload behavior
@@ -359,11 +313,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadPreview(m.previewer, session)
 			}
 		}
-		return m, nil
-
-	case RestorationCompleteMsg:
-		// Filter restoration complete, re-enable cursor reset on filter changes
-		m.restoringState = false
 		return m, nil
 
 	case ProcessInfoMsg:
@@ -721,40 +670,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if currentFilter != m.lastFilter {
 			prevFilter := m.lastFilter
 			m.lastFilter = currentFilter
-			logDebug("DEBUG filterChange: prev=%q curr=%q restoringState=%v", prevFilter, currentFilter, m.restoringState)
+			logDebug("DEBUG filterChange: prev=%q curr=%q", prevFilter, currentFilter)
 
-			// Skip all this if we're restoring state
-			if !m.restoringState {
-				// Transition: empty → non-empty (start typing)
-				if prevFilter == "" && currentFilter != "" {
-					// Swap to full items for fuzzy search
-					*m.expandedGroup = ""
-					m.list.SetItems(m.allItems)
-					m.list.Filter = tmuxFirstFilter(m.allItems)
-					// Re-apply filter text after item swap
-					m.list.SetFilterText(currentFilter)
-					m.list.SetFilterState(list.Filtering)
-				}
+			// Transition: empty → non-empty (start typing)
+			if prevFilter == "" && currentFilter != "" {
+				// Swap to full items for fuzzy search
+				*m.expandedGroup = ""
+				m.list.SetItems(m.allItems)
+				m.list.Filter = tmuxFirstFilter(m.allItems)
+				// Re-apply filter text after item swap
+				m.list.SetFilterText(currentFilter)
+				m.list.SetFilterState(list.Filtering)
+			}
 
-				// Transition: non-empty → empty (cleared filter)
-				if prevFilter != "" && currentFilter == "" {
-					// Swap back to collapsed display
-					displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
-					m.list.SetItems(displayItems)
-					m.list.Filter = tmuxFirstFilter(displayItems)
-				}
+			// Transition: non-empty → empty (cleared filter)
+			if prevFilter != "" && currentFilter == "" {
+				// Swap back to collapsed display
+				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+				m.list.SetItems(displayItems)
+				m.list.Filter = tmuxFirstFilter(displayItems)
+			}
 
-				m.list.Select(0)
-				// Load preview for top item, clear for group items
-				switch item := m.list.SelectedItem().(type) {
-				case sessionItem:
-					newModel, previewCmd := m.loadPreviewDebounced(item)
-					m = newModel
-					return m, tea.Batch(cmd, previewCmd)
-				case worktreeGroupItem:
-					m.previewPort.SetContent("")
-					m.previewContent = ""
-				}
+			m.list.Select(0)
+			// Load preview for top item, clear for group items
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				newModel, previewCmd := m.loadPreviewDebounced(item)
+				m = newModel
+				return m, tea.Batch(cmd, previewCmd)
+			case worktreeGroupItem:
+				m.previewPort.SetContent("")
+				m.previewContent = ""
 			}
 		}
 

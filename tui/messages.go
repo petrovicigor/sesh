@@ -24,8 +24,6 @@ type DebounceTickMsg struct {
 	SessionName string
 }
 
-type RestorationCompleteMsg struct{}
-
 type setCursorMsg struct {
 	index int
 }
