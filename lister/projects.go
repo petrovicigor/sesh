@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/joshmedeski/sesh/v2/model"
 )
@@ -97,9 +96,6 @@ func listProjects(l *RealLister) (model.SeshSessions, error) {
 			Path: dirPath, // Full path for connection
 		}
 	}
-
-	// Sort by recency - recently used sessions first
-	sortProjectsByRecency(orderedIndex, directory, l.recent)
 
 	return model.SeshSessions{
 		Directory:    directory,
@@ -273,57 +269,3 @@ func (l *RealLister) FindProjectSession(name string) (model.SeshSession, bool) {
 	return model.SeshSession{}, false
 }
 
-// sortProjectsByRecency sorts the ordered index by recency
-// Recently used sessions appear first, followed by others in original order
-func sortProjectsByRecency(orderedIndex []string, directory model.SeshSessionMap, recentTracker interface{ GetAll() map[string]time.Time }) {
-	if recentTracker == nil {
-		return
-	}
-
-	recentSessions := recentTracker.GetAll()
-	if len(recentSessions) == 0 {
-		return
-	}
-
-	// Separate into recent and non-recent
-	type sessionWithTime struct {
-		key       string
-		timestamp time.Time
-		hasTime   bool
-	}
-
-	sessions := make([]sessionWithTime, len(orderedIndex))
-	for i, key := range orderedIndex {
-		session := directory[key]
-		if ts, exists := recentSessions[session.Name]; exists {
-			sessions[i] = sessionWithTime{key, ts, true}
-		} else {
-			sessions[i] = sessionWithTime{key, time.Time{}, false}
-		}
-	}
-
-	// Sort: recent sessions first (by timestamp desc), then non-recent in original order
-	for i := 0; i < len(sessions)-1; i++ {
-		for j := i + 1; j < len(sessions); j++ {
-			shouldSwap := false
-
-			if sessions[i].hasTime && sessions[j].hasTime {
-				// Both have timestamps - sort by timestamp (most recent first)
-				shouldSwap = sessions[i].timestamp.Before(sessions[j].timestamp)
-			} else if !sessions[i].hasTime && sessions[j].hasTime {
-				// j has timestamp, i doesn't - j should come first
-				shouldSwap = true
-			}
-			// If i has timestamp and j doesn't, or neither have timestamps, keep original order
-
-			if shouldSwap {
-				sessions[i], sessions[j] = sessions[j], sessions[i]
-			}
-		}
-	}
-
-	// Update orderedIndex with sorted keys
-	for i, session := range sessions {
-		orderedIndex[i] = session.key
-	}
-}

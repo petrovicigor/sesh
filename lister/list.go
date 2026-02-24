@@ -75,6 +75,37 @@ func (l *RealLister) List(opts ListOptions) (model.SeshSessions, error) {
 		}
 	}
 
+	// Sort non-tmux sessions by recency so config sessions aren't grouped separately
+	if l.recent != nil {
+		recentSessions := l.recent.GetAll()
+		if len(recentSessions) > 0 {
+			var tmuxIndices []string
+			var nonTmuxIndices []string
+			for _, idx := range fullOrderedIndex {
+				if fullDirectory[idx].Src == "tmux" {
+					tmuxIndices = append(tmuxIndices, idx)
+				} else {
+					nonTmuxIndices = append(nonTmuxIndices, idx)
+				}
+			}
+			slices.SortStableFunc(nonTmuxIndices, func(a, b string) int {
+				aTime, aHas := recentSessions[fullDirectory[a].Name]
+				bTime, bHas := recentSessions[fullDirectory[b].Name]
+				if aHas && bHas {
+					return bTime.Compare(aTime)
+				}
+				if aHas && !bHas {
+					return -1
+				}
+				if !aHas && bHas {
+					return 1
+				}
+				return 0
+			})
+			fullOrderedIndex = append(tmuxIndices, nonTmuxIndices...)
+		}
+	}
+
 	if len(l.config.Blacklist) > 0 {
 		filteredIndex := make([]string, 0, len(fullOrderedIndex))
 		filteredDirectory := make(model.SeshSessionMap)
