@@ -74,10 +74,13 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 		isActive := (session.Src == "tmux")
 		path := session.Path
 
+		// Check git status once (avoid double stat)
+		isGit := path != "" && isGitRepo(path)
+
 		// For active tmux sessions in git repos, show git info
-		if isActive && path != "" && isGitRepo(path) {
+		if isActive && isGit {
 			logDebug("loadPreview: active tmux git repo path")
-			content := GenerateRichPreview(session.Name, path, isActive)
+			content := GenerateRichPreview(session.Name, path, isActive, true)
 			logDebug("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
 			return PreviewLoadedMsg{Content: content}
 		}
@@ -97,7 +100,7 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 		// For non-tmux sessions, show git/directory info
 		if path != "" {
 			logDebug("loadPreview: non-tmux with path, generating rich preview")
-			content := GenerateRichPreview(session.Name, path, isActive)
+			content := GenerateRichPreview(session.Name, path, isActive, isGit)
 			logDebug("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
 			return PreviewLoadedMsg{Content: content}
 		}

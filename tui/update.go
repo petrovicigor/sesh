@@ -21,8 +21,8 @@ func (m Model) loadPreviewDebounced(item sessionItem) (Model, tea.Cmd) {
 	}
 
 	// Otherwise, debounce the preview load
+	// Keep old preview visible until new one loads (no blank flash)
 	m.pendingPreview = sessionName
-	m.previewPort.SetContent("") // Blank while waiting
 	return m, debouncePreview(sessionName)
 }
 

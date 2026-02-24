@@ -32,10 +32,14 @@ const (
 	colorMagentaDim = "\033[2;35m"
 )
 
+// Pre-compiled regex for dimANSI (avoids recompilation per preview)
+var dimANSIRegex = regexp.MustCompile(`\x1b\[([1-9][0-9;]*)m`)
+
 // GenerateRichPreview creates a rich preview similar to preview.sh
-// Git commands run in parallel for better performance
-func GenerateRichPreview(sessionName string, path string, isActive bool) string {
-	logDebug("GenerateRichPreview: start for %q (active=%v)", sessionName, isActive)
+// Git commands run in parallel for better performance.
+// isGit indicates whether the path is a git repo (caller checks to avoid double stat).
+func GenerateRichPreview(sessionName string, path string, isActive bool, isGit bool) string {
+	logDebug("GenerateRichPreview: start for %q (active=%v, git=%v)", sessionName, isActive, isGit)
 	var output strings.Builder
 
 	// Select colors based on active/inactive
@@ -46,8 +50,7 @@ func GenerateRichPreview(sessionName string, path string, isActive bool) string 
 		green = colorGreenDim
 	}
 
-	// Check if it's a git repository
-	if isGitRepo(path) {
+	if isGit {
 		logDebug("GenerateRichPreview: is git repo, launching parallel commands")
 		// Run all git commands in parallel
 		var wg sync.WaitGroup
@@ -222,10 +225,7 @@ func dimANSI(s string) string {
 	s = strings.ReplaceAll(s, "\033[m", "\033[0;2m")
 
 	// Add dim (2) to existing color codes: \033[31m -> \033[2;31m
-	// Pattern: ESC[<numbers>m where numbers start with 1-9
-	// Use \x1b (hex) for escape sequence, ${1} for proper backreference
-	re := regexp.MustCompile(`\x1b\[([1-9][0-9;]*)m`)
-	s = re.ReplaceAllString(s, "\x1b[2;${1}m")
+	s = dimANSIRegex.ReplaceAllString(s, "\x1b[2;${1}m")
 
 	return s
 }
