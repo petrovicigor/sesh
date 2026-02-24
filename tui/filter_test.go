@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -138,23 +139,31 @@ func TestTmuxFirstFilter(t *testing.T) {
 					tc.expectedSource, firstItem.session.Src, tc.searchTerm)
 			}
 
-			// Validate grouping: all tmux sessions should come before non-tmux
-			lastTmuxIndex := -1
-			firstNonTmuxIndex := -1
+			// Validate per-repo grouping: within each repo, tmux sessions come before non-tmux
+			repoLastTmux := make(map[string]int)
+			repoFirstNonTmux := make(map[string]int)
 			for i, rank := range ranks {
 				item := testSessions[rank.Index].(sessionItem)
+				repo := item.session.Name
+				if strings.Contains(repo, "/") {
+					repo = strings.SplitN(repo, "/", 2)[0]
+				}
 				if item.session.Src == "tmux" {
-					lastTmuxIndex = i
-				} else if firstNonTmuxIndex == -1 {
-					firstNonTmuxIndex = i
+					repoLastTmux[repo] = i
+				} else {
+					if _, exists := repoFirstNonTmux[repo]; !exists {
+						repoFirstNonTmux[repo] = i
+					}
 				}
 			}
 
-			// If we have both tmux and non-tmux results, tmux should be first
-			if lastTmuxIndex != -1 && firstNonTmuxIndex != -1 {
-				if lastTmuxIndex > firstNonTmuxIndex {
-					t.Errorf("Tmux sessions not properly grouped for search term '%s': last tmux at %d, first non-tmux at %d",
-						tc.searchTerm, lastTmuxIndex, firstNonTmuxIndex)
+			// Within each repo group, tmux must come before non-tmux
+			for repo, lastTmux := range repoLastTmux {
+				if firstNonTmux, exists := repoFirstNonTmux[repo]; exists {
+					if lastTmux > firstNonTmux {
+						t.Errorf("Repo %q: tmux at pos %d after non-tmux at pos %d for search term '%s'",
+							repo, lastTmux, firstNonTmux, tc.searchTerm)
+					}
 				}
 			}
 		})
@@ -229,18 +238,32 @@ func TestTmuxFirstFilterEdgeCases(t *testing.T) {
 			t.Fatal("Expected results but got none")
 		}
 
-		// Count tmux vs non-tmux positions
+		// Verify per-repo tmux-first: within each repo group, tmux items come before non-tmux
 		tmuxFound := false
-		nonTmuxFound := false
-		for _, rank := range ranks {
+		repoLastTmux := make(map[string]int)    // last position of tmux item per repo
+		repoFirstNonTmux := make(map[string]int) // first position of non-tmux item per repo
+		for i, rank := range ranks {
 			item := items[rank.Index].(sessionItem)
+			repo := item.session.Name
+			if strings.Contains(repo, "/") {
+				repo = strings.SplitN(repo, "/", 2)[0]
+			}
 			if item.session.Src == "tmux" {
-				if nonTmuxFound {
-					t.Error("Found tmux session after non-tmux session - grouping broken")
-				}
 				tmuxFound = true
+				repoLastTmux[repo] = i
 			} else {
-				nonTmuxFound = true
+				if _, exists := repoFirstNonTmux[repo]; !exists {
+					repoFirstNonTmux[repo] = i
+				}
+			}
+		}
+
+		// Within each repo, tmux should come before non-tmux
+		for repo, lastTmux := range repoLastTmux {
+			if firstNonTmux, exists := repoFirstNonTmux[repo]; exists {
+				if lastTmux > firstNonTmux {
+					t.Errorf("Repo %q: tmux session at pos %d after non-tmux at pos %d", repo, lastTmux, firstNonTmux)
+				}
 			}
 		}
 
@@ -287,31 +310,133 @@ func TestTmuxFirstFilterEdgeCases(t *testing.T) {
 				continue // No matches is fine
 			}
 
-			// Verify tmux grouping
-			lastTmuxPos := -1
-			firstNonTmuxPos := -1
+			// Verify per-repo tmux-first grouping
+			repoLastTmux := make(map[string]int)
+			repoFirstNonTmux := make(map[string]int)
 
 			for i, rank := range ranks {
 				item := items[rank.Index].(sessionItem)
+				repo := item.session.Name
+				if strings.Contains(repo, "/") {
+					repo = strings.SplitN(repo, "/", 2)[0]
+				}
 				if item.session.Src == "tmux" {
-					lastTmuxPos = i
-				} else if firstNonTmuxPos == -1 {
-					firstNonTmuxPos = i
+					repoLastTmux[repo] = i
+				} else {
+					if _, exists := repoFirstNonTmux[repo]; !exists {
+						repoFirstNonTmux[repo] = i
+					}
 				}
 			}
 
-			// If we have both types, tmux must come first
-			if lastTmuxPos != -1 && firstNonTmuxPos != -1 && lastTmuxPos > firstNonTmuxPos {
-				t.Errorf("Search '%s': tmux sessions not properly grouped (last tmux: %d, first non-tmux: %d)",
-					search.term, lastTmuxPos, firstNonTmuxPos)
+			// Within each repo group, tmux must come before non-tmux
+			for repo, lastTmux := range repoLastTmux {
+				if firstNonTmux, exists := repoFirstNonTmux[repo]; exists {
+					if lastTmux > firstNonTmux {
+						t.Errorf("Search '%s': repo %q has tmux at pos %d after non-tmux at pos %d",
+							search.term, repo, lastTmux, firstNonTmux)
 
-				// Print the actual order for debugging
-				t.Logf("Results for '%s':", search.term)
-				for i, rank := range ranks {
-					item := items[rank.Index].(sessionItem)
-					t.Logf("  %d. %s (%s)", i, item.session.Name, item.session.Src)
+						// Print the actual order for debugging
+						t.Logf("Results for '%s':", search.term)
+						for j, rank := range ranks {
+							item := items[rank.Index].(sessionItem)
+							t.Logf("  %d. %s (%s)", j, item.session.Name, item.session.Src)
+						}
+					}
+				}
+			}
+
+			// Also verify repo grouping: items from same repo should be adjacent
+			seen := make(map[string]bool)
+			lastRepo := ""
+			for _, rank := range ranks {
+				item := items[rank.Index].(sessionItem)
+				repo := item.session.Name
+				if strings.Contains(repo, "/") {
+					repo = strings.SplitN(repo, "/", 2)[0]
+				}
+				if repo != lastRepo {
+					if seen[repo] {
+						t.Errorf("Search '%s': repo %q appeared again after leaving — results not grouped", search.term, repo)
+						break
+					}
+					seen[repo] = true
+					lastRepo = repo
 				}
 			}
 		}
 	})
+}
+
+func TestTmuxFirstFilterGroupsByRepo(t *testing.T) {
+	items := []list.Item{
+		sessionItem{session: model.SeshSession{Name: "chase-monorepo", Src: "tmux"}, displayName: "chase-monorepo"},
+		sessionItem{session: model.SeshSession{Name: "frontend-monorepo", Src: "projects"}, displayName: "frontend-monorepo"},
+		sessionItem{session: model.SeshSession{Name: "frontend-monorepo/develop", Src: "projects"}, displayName: "frontend-monorepo/develop"},
+		sessionItem{session: model.SeshSession{Name: "chase-monorepo/feature-cdk", Src: "tmux"}, displayName: "chase-monorepo/feature-cdk"},
+		sessionItem{session: model.SeshSession{Name: "chase-monorepo/review", Src: "projects"}, displayName: "chase-monorepo/review"},
+		sessionItem{session: model.SeshSession{Name: "chase-monorepo/develop", Src: "projects"}, displayName: "chase-monorepo/develop"},
+	}
+
+	targets := make([]string, len(items))
+	for i, item := range items {
+		targets[i] = item.(sessionItem).FilterValue()
+	}
+
+	filter := tmuxFirstFilter(items)
+	ranks := filter("monorepo", targets)
+
+	if len(ranks) == 0 {
+		t.Fatal("expected results")
+	}
+
+	// Verify grouping: items from same repo should be adjacent
+	type result struct {
+		name string
+		repo string
+	}
+	results := make([]result, 0, len(ranks))
+	for _, rank := range ranks {
+		si := items[rank.Index].(sessionItem)
+		repo := si.session.Name
+		if strings.Contains(repo, "/") {
+			repo = strings.SplitN(repo, "/", 2)[0]
+		}
+		results = append(results, result{name: si.session.Name, repo: repo})
+	}
+
+	// Check that once we leave a repo group, we don't come back to it
+	seen := make(map[string]bool)
+	lastRepo := ""
+	for _, r := range results {
+		if r.repo != lastRepo {
+			if seen[r.repo] {
+				t.Errorf("repo %q appeared again after leaving — results not grouped. Order: %v", r.repo, results)
+				break
+			}
+			seen[r.repo] = true
+			lastRepo = r.repo
+		}
+	}
+
+	// Within chase-monorepo group, tmux items should come first
+	chaseResults := []result{}
+	for _, r := range results {
+		if r.repo == "chase-monorepo" {
+			chaseResults = append(chaseResults, r)
+		}
+	}
+	if len(chaseResults) >= 2 {
+		// First chase result should be tmux
+		firstChaseName := chaseResults[0].name
+		foundFirstInTmux := false
+		for _, item := range items {
+			if si, ok := item.(sessionItem); ok && si.session.Name == firstChaseName && si.session.Src == "tmux" {
+				foundFirstInTmux = true
+			}
+		}
+		if !foundFirstInTmux {
+			t.Errorf("first chase-monorepo result should be tmux, got %q", firstChaseName)
+		}
+	}
 }

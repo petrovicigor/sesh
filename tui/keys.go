@@ -6,13 +6,15 @@ type KeyMap struct {
 	Quit             key.Binding
 	Select           key.Binding
 	FilterAll        key.Binding
-	FilterTmux       key.Binding
 	FilterConfig     key.Binding
 	FilterZoxide     key.Binding
 	ToggleZoxide     key.Binding
 	Delete           key.Binding
 	GoToWorktreeRoot key.Binding
 	DetectProcesses  key.Binding
+	ExpandGroup      key.Binding
+	SetDefault       key.Binding
+	RepoFocus        key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -27,10 +29,6 @@ var DefaultKeyMap = KeyMap{
 	FilterAll: key.NewBinding(
 		key.WithKeys("ctrl+a"),
 		key.WithHelp("ctrl+a", "all sessions"),
-	),
-	FilterTmux: key.NewBinding(
-		key.WithKeys("ctrl+t"),
-		key.WithHelp("ctrl+t", "tmux only"),
 	),
 	FilterConfig: key.NewBinding(
 		key.WithKeys("ctrl+g"),
@@ -53,7 +51,19 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("ctrl+0", "go to worktree root"),
 	),
 	DetectProcesses: key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "detect processes"),
+	),
+	ExpandGroup: key.NewBinding(
 		key.WithKeys("tab"),
-		key.WithHelp("tab", "detect processes"),
+		key.WithHelp("tab", "expand/collapse group"),
+	),
+	SetDefault: key.NewBinding(
+		key.WithKeys("ctrl+p"),
+		key.WithHelp("ctrl+p", "set default worktree"),
+	),
+	RepoFocus: key.NewBinding(
+		key.WithKeys("ctrl+t"),
+		key.WithHelp("ctrl+t", "focus repo worktrees"),
 	),
 }

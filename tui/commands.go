@@ -9,6 +9,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
+	"github.com/joshmedeski/sesh/v2/state"
 )
 
 func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
@@ -21,8 +22,6 @@ func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
 		}
 
 		switch filter {
-		case FilterTmux:
-			opts.Tmux = true
 		case FilterConfig:
 			opts.Config = true
 		case FilterZoxide:
@@ -49,8 +48,6 @@ func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText 
 		}
 
 		switch filter {
-		case FilterTmux:
-			opts.Tmux = true
 		case FilterConfig:
 			opts.Config = true
 		case FilterZoxide:
@@ -73,31 +70,40 @@ func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText 
 
 func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 	return func() tea.Msg {
+		logTiming("loadPreview: starting for %q (src=%s, path=%s)", session.Name, session.Src, session.Path)
 		isActive := (session.Src == "tmux")
 		path := session.Path
 
 		// For active tmux sessions in git repos, show git info
 		if isActive && path != "" && isGitRepo(path) {
+			logTiming("loadPreview: active tmux git repo path")
 			content := GenerateRichPreview(session.Name, path, isActive)
+			logTiming("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
 			return PreviewLoadedMsg{Content: content}
 		}
 
 		// For active tmux sessions NOT in git repos, capture pane content
 		if isActive {
+			logTiming("loadPreview: active tmux non-git, trying pane capture")
 			content, err := p.Preview(session.Name)
 			if err == nil && content != "" {
+				logTiming("loadPreview: pane capture done (%d bytes)", len(content))
 				return PreviewLoadedMsg{Content: content}
 			}
+			logTiming("loadPreview: pane capture failed, falling through")
 			// Fallback to rich preview if capture fails
 		}
 
 		// For non-tmux sessions, show git/directory info
 		if path != "" {
+			logTiming("loadPreview: non-tmux with path, generating rich preview")
 			content := GenerateRichPreview(session.Name, path, isActive)
+			logTiming("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
 			return PreviewLoadedMsg{Content: content}
 		}
 
 		// Final fallback to default previewer
+		logTiming("loadPreview: fallback to default previewer")
 		content, err := p.Preview(session.Name)
 		if err != nil {
 			return PreviewLoadedMsg{Content: "Error loading preview: " + err.Error()}
@@ -105,6 +111,7 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 		if content == "" {
 			return PreviewLoadedMsg{Content: "No preview available"}
 		}
+		logTiming("loadPreview: default previewer done (%d bytes)", len(content))
 		return PreviewLoadedMsg{Content: content}
 	}
 }
@@ -143,6 +150,19 @@ func restoreFilterMode(filterText string) tea.Cmd {
 	})
 
 	return tea.Sequence(cmds...)
+}
+
+// saveDefaults writes worktree defaults to disk asynchronously
+func saveDefaults(path string, defaults map[string]string) tea.Cmd {
+	// Copy the map to avoid concurrent access
+	copied := make(map[string]string, len(defaults))
+	for k, v := range defaults {
+		copied[k] = v
+	}
+	return func() tea.Msg {
+		err := state.SaveDefaults(path, copied)
+		return DefaultsSavedMsg{Err: err}
+	}
 }
 
 // detectAllProcesses runs a single tmux command to detect processes in all sessions

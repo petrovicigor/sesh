@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"os"
+
 	"github.com/charmbracelet/bubbletea"
 	"github.com/joshmedeski/sesh/v2/connector"
 	"github.com/joshmedeski/sesh/v2/icon"
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
+	"github.com/joshmedeski/sesh/v2/state"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
@@ -38,18 +41,33 @@ func NewTUI(
 }
 
 func (t *TUI) Run() (string, error) {
-	// Pre-load sessions synchronously for instant display
+	resetStartTime()
+	logTiming("Run() entered")
+
+	// Load sessions synchronously (fast: ~10-15ms parallel)
 	sessions, err := t.lister.List(lister.ListOptions{
-		HideDuplicates: true, // Hide duplicate sessions (e.g., tmux + projects for same dir)
+		HideDuplicates: true,
 	})
 	if err != nil {
 		return "", err
 	}
+	logTiming("lister.List() done (%d sessions)", len(sessions.OrderedIndex))
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions)
-	p := tea.NewProgram(m, tea.WithAltScreen()) // Use alt screen to eliminate gaps
+	// Load worktree defaults (sub-millisecond, never fails)
+	defaultsPath := state.DefaultsPath(os.Getenv("XDG_STATE_HOME"))
+	worktreeDefaults, _ := state.LoadDefaults(defaultsPath)
+	logTiming("state.LoadDefaults() done")
+
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath)
+	logTiming("newModel() done")
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	logTiming("tea.NewProgram() created, calling p.Run()")
 
 	result, err := p.Run()
+	logTiming("p.Run() returned")
+	flushDebugLog()
+
 	if err != nil {
 		return "", err
 	}

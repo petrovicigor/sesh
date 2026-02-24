@@ -26,9 +26,125 @@ func (m Model) loadPreviewDebounced(item sessionItem) (Model, tea.Cmd) {
 	return m, debouncePreview(sessionName)
 }
 
+// expandGroup expands a worktree group, showing its dormant worktrees.
+// Returns updated model and commands to re-enter filter mode with preview.
+func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
+	*m.expandedGroup = repoName
+	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup)
+
+	m.list.ResetFilter()
+	m.lastFilter = "" // Prevent filter transition from overwriting items
+	m.list.SetItems(displayItems)
+	m.list.Filter = tmuxFirstFilter(displayItems)
+
+	// Find cursor target: first newly-revealed item from this group.
+	// For active groups: first dormant (non-tmux) child after the badge carrier.
+	// For dormant-only groups: first child after the group header.
+	group := m.worktreeGroups[repoName]
+	targetIndex := 0
+	foundBadgeOrHeader := false
+	for i, listItem := range displayItems {
+		switch v := listItem.(type) {
+		case worktreeGroupItem:
+			if v.repoName == repoName {
+				foundBadgeOrHeader = true
+			}
+		case sessionItem:
+			if v.groupRepo == repoName {
+				// This is the badge carrier — dormant items follow it
+				foundBadgeOrHeader = true
+				continue
+			}
+			if foundBadgeOrHeader {
+				// Match worktree items (repo/branch) or bare repo items (exact name match)
+				if strings.Contains(v.session.Name, "/") {
+					itemRepo := strings.SplitN(v.session.Name, "/", 2)[0]
+					if itemRepo == repoName {
+						targetIndex = i
+						goto found
+					}
+				} else if v.session.Name == repoName {
+					targetIndex = i
+					goto found
+				}
+			}
+			// For active groups with no dormant: target first active item
+			if group != nil && !foundBadgeOrHeader && strings.Contains(v.session.Name, "/") {
+				itemRepo := strings.SplitN(v.session.Name, "/", 2)[0]
+				if itemRepo == repoName && !group.tmuxNames[v.session.Name] {
+					targetIndex = i
+					goto found
+				}
+			}
+		}
+	}
+found:
+	logDebug("DEBUG expandGroup: repoName=%s targetIndex=%d totalItems=%d", repoName, targetIndex, len(displayItems))
+
+	// Enter filter mode synchronously (no message round-trip, no jitter)
+	m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m.list.Select(targetIndex)
+
+	// Force clean redraw (item count changed, prevents terminal misalignment)
+	cmds := []tea.Cmd{tea.ClearScreen}
+
+	// Load preview for target item
+	if targetIndex < len(displayItems) {
+		if item, ok := displayItems[targetIndex].(sessionItem); ok {
+			m.previewPort.SetContent("")
+			cmds = append(cmds, loadPreview(m.previewer, item.session))
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// collapseGroup collapses any expanded group back to its single-line form.
+// Returns updated model and command to re-enter filter mode.
+func (m Model) collapseGroup() (Model, tea.Cmd) {
+	groupRepo := *m.expandedGroup
+	*m.expandedGroup = ""
+	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+
+	m.list.ResetFilter()
+	m.lastFilter = "" // Prevent filter transition from overwriting items
+	m.list.SetItems(displayItems)
+	m.list.Filter = tmuxFirstFilter(displayItems)
+
+	// Find the group item or badged session to position cursor on
+	targetIndex := 0
+	for i, item := range displayItems {
+		if gi, ok := item.(worktreeGroupItem); ok && gi.repoName == groupRepo {
+			targetIndex = i
+			break
+		}
+		if si, ok := item.(sessionItem); ok && si.groupRepo == groupRepo {
+			targetIndex = i
+			break
+		}
+	}
+	m.previewPort.SetContent("")
+	m.previewContent = ""
+
+	// Enter filter mode synchronously (no message round-trip, no jitter)
+	m.list, _ = m.list.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m.list.Select(targetIndex)
+
+	// Force clean redraw (item count changed, prevents terminal misalignment)
+	cmds := []tea.Cmd{tea.ClearScreen}
+
+	// Load preview for target item
+	if targetIndex < len(displayItems) {
+		if item, ok := displayItems[targetIndex].(sessionItem); ok {
+			cmds = append(cmds, loadPreview(m.previewer, item.session))
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		logTiming("WindowSizeMsg: %dx%d", msg.Width, msg.Height)
 		m.width = msg.Width
 		m.height = msg.Height
 
@@ -58,9 +174,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Sessions.Directory != nil && msg.Sessions.OrderedIndex != nil {
 			for _, key := range msg.Sessions.OrderedIndex {
 				if session, ok := msg.Sessions.Directory[key]; ok {
+					displayName := m.icon.AddIcon(session)
 					items = append(items, sessionItem{
 						session:     session,
-						displayName: m.icon.AddIcon(session),
+						displayName: displayName,
+						iconPrefix:  extractIconPrefix(displayName, session.Name),
 					})
 				}
 			}
@@ -69,10 +187,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Partition items so tmux sessions appear first
 		items = partitionItemsByTmux(items)
-		m.list.SetItems(items)
 
-		// Update filter function with new items
-		m.list.Filter = tmuxFirstFilter(items)
+		// Build worktree groups
+		m.allItems = items
+		m.worktreeGroups = buildWorktreeGroups(items, *m.worktreeDefaults)
+		*m.expandedGroup = ""
+
+		// Use collapsed display items
+		displayItems := buildDisplayItems(items, m.worktreeGroups, "")
+		m.list.SetItems(displayItems)
+
+		// Update filter function with display items
+		m.list.Filter = tmuxFirstFilter(displayItems)
 
 		// Update title based on current filter
 		m.list.Title = getFilterTitle(m.currentFilter)
@@ -85,10 +211,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Update lastFilter to prevent cursor reset on filter change detection
 			m.lastFilter = msg.PreserveFilterText
 
-			// Set cursor position (clamped to valid range)
+			// Set cursor position (clamped to valid range of display items)
 			targetIndex := msg.PreserveCursorIndex
-			if targetIndex >= len(items) {
-				targetIndex = len(items) - 1
+			if targetIndex >= len(displayItems) {
+				targetIndex = len(displayItems) - 1
 			}
 			if targetIndex < 0 {
 				targetIndex = 0
@@ -188,6 +314,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
+		logTiming("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
 		m.previewContent = msg.Content
 		// Let the viewport handle width/truncation directly —
 		// no pre-wrapping with lipgloss.Width() which was double-processing
@@ -222,12 +349,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logDebug("DEBUG: ProcessInfoMsg received with %d processes", len(msg.Processes))
 		// Update map in-place to preserve delegate's pointer reference
 		// Clear existing entries
-		for k := range m.processInfo {
-			delete(m.processInfo, k)
+		for k := range *m.processInfo {
+			delete(*m.processInfo, k)
 		}
 		// Copy new entries
 		for k, v := range msg.Processes {
-			m.processInfo[k] = v
+			(*m.processInfo)[k] = v
 			logDebug("DEBUG: Process detected - session: %s, process: %s", k, v)
 		}
 
@@ -235,42 +362,87 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logDebug("DEBUG: Process detection complete, %d processes found", len(msg.Processes))
 		return m, nil
 
+	case DefaultsSavedMsg:
+		if msg.Err != nil {
+			logDebug("DEBUG: Failed to save defaults: %v", msg.Err)
+		}
+		return m, nil
+
 	case setCursorMsg:
 		// Set cursor position and load preview
+		logDebug("DEBUG setCursorMsg: index=%d currentIndex=%d totalItems=%d", msg.index, m.list.Index(), len(m.list.Items()))
 		m.list.Select(msg.index)
-		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+		logDebug("DEBUG setCursorMsg: after Select, index=%d", m.list.Index())
+		switch item := m.list.SelectedItem().(type) {
+		case sessionItem:
 			m.previewPort.SetContent("")
 			return m, loadPreview(m.previewer, item.session)
+		case worktreeGroupItem:
+			m.previewPort.SetContent("")
+			m.previewContent = ""
 		}
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle Tab key explicitly FIRST (before any other checks)
-		if msg.Type == tea.KeyTab {
-			logDebug("DEBUG: Tab key detected (KeyTab type)")
+		// Handle Ctrl+E for process detection
+		if key.Matches(msg, m.keys.DetectProcesses) {
+			logDebug("DEBUG: Ctrl+E pressed, triggering process detection")
 			return m, detectAllProcesses()
+		}
+
+		// Handle Tab for group expand/collapse
+		if key.Matches(msg, m.keys.ExpandGroup) {
+			if *m.expandedGroup != "" {
+				return m.collapseGroup()
+			}
+			if item, ok := m.list.SelectedItem().(worktreeGroupItem); ok {
+				return m.expandGroup(item.repoName)
+			}
+			// Handle any sessionItem that belongs to a worktree group
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				if item.groupRepo != "" {
+					return m.expandGroup(item.groupRepo)
+				}
+				// Check if this session belongs to any worktree group
+				if strings.Contains(item.session.Name, "/") {
+					repoName := strings.SplitN(item.session.Name, "/", 2)[0]
+					if _, isGrouped := m.worktreeGroups[repoName]; isGrouped {
+						return m.expandGroup(repoName)
+					}
+				}
+			}
+			return m, nil
 		}
 
 		// Handle quit/select/filter keys first
 		switch {
 		case key.Matches(msg, m.keys.Quit):
+			// Only Escape collapses expanded group; ctrl+c/ctrl+b always quit
+			if *m.expandedGroup != "" && msg.Type == tea.KeyEscape {
+				return m.collapseGroup()
+			}
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keys.Select):
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
 				m.selected = item.session.Name
 				return m, tea.Quit
+			case worktreeGroupItem:
+				if item.defaultBranch != "" {
+					// Has default — connect to default worktree directly
+					m.selected = item.repoName + "/" + item.defaultBranch
+					return m, tea.Quit
+				}
+
+				// No default — expand the group
+				return m.expandGroup(item.repoName)
 			}
 
 		case key.Matches(msg, m.keys.FilterAll):
 			m.currentFilter = FilterAll
 			m.lastFilter = "" // Reset filter tracking
 			return m, loadSessionsWithFilter(m.lister, FilterAll)
-
-		case key.Matches(msg, m.keys.FilterTmux):
-			m.currentFilter = FilterTmux
-			m.lastFilter = "" // Reset filter tracking
-			return m, loadSessionsWithFilter(m.lister, FilterTmux)
 
 		case key.Matches(msg, m.keys.FilterConfig):
 			m.currentFilter = FilterConfig
@@ -298,21 +470,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Delete session if it's a tmux session
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				if item.session.Src == "tmux" {
-					// Capture current state BEFORE killing
-					filterText := m.list.FilterValue()
-					cursorIndex := m.list.Index()
-
-					// Move cursor up after deletion (go to previous item)
-					newCursorIndex := cursorIndex - 1
-					if newCursorIndex < 0 {
-						newCursorIndex = 0
-					}
-
+					logDebug("DEBUG ctrl+d: killing session=%s cursorIndex=%d expandedGroup=%q currentFilter=%d", item.session.Name, m.list.Index(), *m.expandedGroup, m.currentFilter)
 					_, err := m.tmux.KillSession(item.session.Name)
 					if err == nil {
-						// Reload sessions with state preservation
-						return m, loadSessionsPreservingState(m.lister, m.currentFilter, filterText, newCursorIndex)
+						*m.expandedGroup = ""
+						logDebug("DEBUG ctrl+d: killed ok, reloading with filter=%d", m.currentFilter)
+						return m, loadSessionsWithFilter(m.lister, m.currentFilter)
 					}
+					logDebug("DEBUG ctrl+d: kill error: %v", err)
 				}
 			}
 			return m, nil
@@ -340,32 +505,159 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case key.Matches(msg, m.keys.DetectProcesses):
-			// Trigger process detection when Tab is pressed
-			logDebug("DEBUG: Tab key pressed, triggering process detection")
-			return m, detectAllProcesses()
+		case key.Matches(msg, m.keys.SetDefault):
+			// Set/clear default worktree for a repo
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				if (item.session.Src == "projects" || item.session.Src == "tmux") && strings.Contains(item.session.Name, "/") {
+					parts := strings.SplitN(item.session.Name, "/", 2)
+					repoName := parts[0]
+					branchName := parts[1]
+
+					// Toggle: if already default, clear it
+					if (*m.worktreeDefaults)[repoName] == branchName {
+						delete(*m.worktreeDefaults, repoName)
+					} else {
+						(*m.worktreeDefaults)[repoName] = branchName
+					}
+
+					// Rebuild groups with updated defaults
+					m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults)
+					*m.expandedGroup = ""
+					displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+
+					m.list.ResetFilter()
+					m.lastFilter = "" // Prevent filter transition from overwriting items
+					m.list.SetItems(displayItems)
+					m.list.Filter = tmuxFirstFilter(displayItems)
+
+					// Find the group item to position cursor on
+					targetIndex := 0
+					for i, listItem := range displayItems {
+						if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
+							targetIndex = i
+							break
+						}
+					}
+					m.previewPort.SetContent("")
+					m.previewContent = ""
+
+					// Sequence: enter filter mode, then set cursor + async save
+					seqCmd := tea.Sequence(
+						func() tea.Msg {
+							return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+						},
+						func() tea.Msg {
+							return setCursorMsg{index: targetIndex}
+						},
+					)
+					saveCmd := saveDefaults(m.defaultsPath, *m.worktreeDefaults)
+					return m, tea.Batch(seqCmd, saveCmd)
+				}
+			}
+			return m, nil
+
+		case key.Matches(msg, m.keys.RepoFocus):
+			// Determine repo name from selected item
+			var repoName string
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				if strings.Contains(item.session.Name, "/") {
+					repoName = strings.SplitN(item.session.Name, "/", 2)[0]
+				}
+			case worktreeGroupItem:
+				repoName = item.repoName
+			}
+
+			if repoName == "" {
+				return m, nil
+			}
+
+			// Toggle focus
+			var targetIndex int
+			if m.repoFocusFilter == repoName {
+				// Clear focus — restore normal view
+				m.repoFocusFilter = ""
+				*m.expandedGroup = ""
+				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+
+				m.list.ResetFilter()
+				m.lastFilter = "" // Prevent filter transition from overwriting items
+				m.list.SetItems(displayItems)
+				m.list.Filter = tmuxFirstFilter(displayItems)
+
+				for i, listItem := range displayItems {
+					if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
+						targetIndex = i
+						break
+					}
+				}
+
+				m.list.Title = getFilterTitle(m.currentFilter)
+			} else {
+				// Set focus — filter to only this repo's worktrees
+				m.repoFocusFilter = repoName
+				*m.expandedGroup = ""
+
+				focusedItems := make([]list.Item, 0)
+				for _, item := range m.allItems {
+					if si, ok := item.(sessionItem); ok {
+						if strings.Contains(si.session.Name, "/") {
+							itemRepo := strings.SplitN(si.session.Name, "/", 2)[0]
+							if itemRepo == repoName {
+								focusedItems = append(focusedItems, item)
+							}
+						} else if si.session.Name == repoName {
+							focusedItems = append(focusedItems, item)
+						}
+					}
+				}
+
+				m.list.ResetFilter()
+				m.lastFilter = "" // Prevent filter transition from overwriting items
+				m.list.SetItems(focusedItems)
+				m.list.Filter = tmuxFirstFilter(focusedItems)
+				targetIndex = 0
+
+				m.list.Title = "🔍 " + repoName
+			}
+
+			m.previewPort.SetContent("")
+			m.previewContent = ""
+
+			return m, tea.Sequence(
+				func() tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+				},
+				func() tea.Msg {
+					return setCursorMsg{index: targetIndex}
+				},
+			)
 		}
 
-		// When filtering, intercept arrow keys and Tab and handle them ourselves
+		// When filtering, intercept arrow keys and handle them ourselves
 		// This prevents the list from exiting filter mode
 		if m.list.FilterState() == list.Filtering {
 			switch msg.String() {
-			case "tab":
-				// Trigger process detection when Tab is pressed
-				logDebug("DEBUG: Tab key pressed in filtering mode, triggering process detection")
-				return m, detectAllProcesses()
 			case "up":
 				m.list.CursorUp()
-				// Load preview for newly selected session with cache/debounce
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				// Load preview for newly selected session, clear for group items
+				switch item := m.list.SelectedItem().(type) {
+				case sessionItem:
 					return m.loadPreviewDebounced(item)
+				case worktreeGroupItem:
+					m.previewPort.SetContent("")
+					m.previewContent = ""
 				}
 				return m, nil
 			case "down":
 				m.list.CursorDown()
-				// Load preview for newly selected session with cache/debounce
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				// Load preview for newly selected session, clear for group items
+				switch item := m.list.SelectedItem().(type) {
+				case sessionItem:
 					return m.loadPreviewDebounced(item)
+				case worktreeGroupItem:
+					m.previewPort.SetContent("")
+					m.previewContent = ""
 				}
 				return m, nil
 			}
@@ -375,19 +667,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
 
-		// If filter text changed, reset cursor to top and load preview
+		// If filter text changed, handle item swapping and cursor reset
 		currentFilter := m.list.FilterValue()
 		if currentFilter != m.lastFilter {
+			prevFilter := m.lastFilter
 			m.lastFilter = currentFilter
+			logDebug("DEBUG filterChange: prev=%q curr=%q restoringState=%v", prevFilter, currentFilter, m.restoringState)
 
-			// Skip cursor reset if we're restoring state
+			// Skip all this if we're restoring state
 			if !m.restoringState {
+				// Transition: empty → non-empty (start typing)
+				if prevFilter == "" && currentFilter != "" {
+					// Swap to full items for fuzzy search
+					*m.expandedGroup = ""
+					m.list.SetItems(m.allItems)
+					m.list.Filter = tmuxFirstFilter(m.allItems)
+					// Re-apply filter text after item swap
+					m.list.SetFilterText(currentFilter)
+					m.list.SetFilterState(list.Filtering)
+				}
+
+				// Transition: non-empty → empty (cleared filter)
+				if prevFilter != "" && currentFilter == "" {
+					// Swap back to collapsed display
+					displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+					m.list.SetItems(displayItems)
+					m.list.Filter = tmuxFirstFilter(displayItems)
+				}
+
 				m.list.Select(0)
-				// Load preview for top item with cache/debounce
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				// Load preview for top item, clear for group items
+				switch item := m.list.SelectedItem().(type) {
+				case sessionItem:
 					newModel, previewCmd := m.loadPreviewDebounced(item)
 					m = newModel
 					return m, tea.Batch(cmd, previewCmd)
+				case worktreeGroupItem:
+					m.previewPort.SetContent("")
+					m.previewContent = ""
 				}
 			}
 		}
@@ -403,8 +720,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func getFilterTitle(filter FilterType) string {
 	switch filter {
-	case FilterTmux:
-		return " tmux"
 	case FilterConfig:
 		return "⚙️ config"
 	case FilterZoxide:

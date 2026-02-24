@@ -35,6 +35,7 @@ const (
 // GenerateRichPreview creates a rich preview similar to preview.sh
 // Git commands run in parallel for better performance
 func GenerateRichPreview(sessionName string, path string, isActive bool) string {
+	logTiming("GenerateRichPreview: start for %q (active=%v)", sessionName, isActive)
 	var output strings.Builder
 
 	// Select colors based on active/inactive
@@ -47,6 +48,7 @@ func GenerateRichPreview(sessionName string, path string, isActive bool) string 
 
 	// Check if it's a git repository
 	if isGitRepo(path) {
+		logTiming("GenerateRichPreview: is git repo, launching parallel commands")
 		// Run all git commands in parallel
 		var wg sync.WaitGroup
 		var branch, tracking, status, commits, claudeSessions string
@@ -81,6 +83,7 @@ func GenerateRichPreview(sessionName string, path string, isActive bool) string 
 
 		// Wait for all commands to complete
 		wg.Wait()
+		logTiming("GenerateRichPreview: all parallel commands done")
 
 		// Build output with results
 		output.WriteString(fmt.Sprintf("%s󰘬 %s%s%s%s\n\n", cyan, branch, green, tracking, colorReset))

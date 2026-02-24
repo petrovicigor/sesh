@@ -34,3 +34,7 @@ type setCursorMsg struct {
 type ProcessInfoMsg struct {
 	Processes map[string]string // session name -> process type ("node", etc)
 }
+
+type DefaultsSavedMsg struct {
+	Err error // nil on success
+}
