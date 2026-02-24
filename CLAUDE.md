@@ -273,12 +273,12 @@ If `sesh list` produces no output or crashes after rebuilding, it's likely a **m
 
 ```bash
 rm ~/dotfiles/bin/sesh
-CGO_ENABLED=1 go build -ldflags "-X 'main.version=$(git describe --tags --abbrev=0)'" -o ~/dotfiles/bin/sesh
+go build -ldflags "-X 'main.version=$(git describe --tags --abbrev=0)'" -o ~/dotfiles/bin/sesh
 chmod +x ~/dotfiles/bin/sesh
 ```
 
 **Key points:**
-- `CGO_ENABLED=1` is required because of the `go-sqlite3` dependency
+- No `CGO_ENABLED=1` needed — sqlite dependency uses pure-Go `modernc.org/sqlite`
 - Always `rm` before writing the new binary — `cp` over an existing file keeps the same inode and macOS doesn't re-validate the code signature
 - `~/bin` is a symlink to `~/dotfiles/bin`, so both paths refer to the same file
 

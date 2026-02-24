@@ -70,40 +70,40 @@ func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText 
 
 func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 	return func() tea.Msg {
-		logTiming("loadPreview: starting for %q (src=%s, path=%s)", session.Name, session.Src, session.Path)
+		logDebug("loadPreview: starting for %q (src=%s, path=%s)", session.Name, session.Src, session.Path)
 		isActive := (session.Src == "tmux")
 		path := session.Path
 
 		// For active tmux sessions in git repos, show git info
 		if isActive && path != "" && isGitRepo(path) {
-			logTiming("loadPreview: active tmux git repo path")
+			logDebug("loadPreview: active tmux git repo path")
 			content := GenerateRichPreview(session.Name, path, isActive)
-			logTiming("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
+			logDebug("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
 			return PreviewLoadedMsg{Content: content}
 		}
 
 		// For active tmux sessions NOT in git repos, capture pane content
 		if isActive {
-			logTiming("loadPreview: active tmux non-git, trying pane capture")
+			logDebug("loadPreview: active tmux non-git, trying pane capture")
 			content, err := p.Preview(session.Name)
 			if err == nil && content != "" {
-				logTiming("loadPreview: pane capture done (%d bytes)", len(content))
+				logDebug("loadPreview: pane capture done (%d bytes)", len(content))
 				return PreviewLoadedMsg{Content: content}
 			}
-			logTiming("loadPreview: pane capture failed, falling through")
+			logDebug("loadPreview: pane capture failed, falling through")
 			// Fallback to rich preview if capture fails
 		}
 
 		// For non-tmux sessions, show git/directory info
 		if path != "" {
-			logTiming("loadPreview: non-tmux with path, generating rich preview")
+			logDebug("loadPreview: non-tmux with path, generating rich preview")
 			content := GenerateRichPreview(session.Name, path, isActive)
-			logTiming("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
+			logDebug("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
 			return PreviewLoadedMsg{Content: content}
 		}
 
 		// Final fallback to default previewer
-		logTiming("loadPreview: fallback to default previewer")
+		logDebug("loadPreview: fallback to default previewer")
 		content, err := p.Preview(session.Name)
 		if err != nil {
 			return PreviewLoadedMsg{Content: "Error loading preview: " + err.Error()}
@@ -111,7 +111,7 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 		if content == "" {
 			return PreviewLoadedMsg{Content: "No preview available"}
 		}
-		logTiming("loadPreview: default previewer done (%d bytes)", len(content))
+		logDebug("loadPreview: default previewer done (%d bytes)", len(content))
 		return PreviewLoadedMsg{Content: content}
 	}
 }

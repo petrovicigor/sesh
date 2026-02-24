@@ -127,7 +127,7 @@ func newModel(
 	worktreeDefaults map[string]string,
 	defaultsPath string,
 ) Model {
-	logTiming("newModel: building list items")
+	logDebug("newModel: building list items")
 
 	// Build list items with pre-computed display names
 	items := make([]list.Item, 0, len(sessions.OrderedIndex))
@@ -143,17 +143,17 @@ func newModel(
 			}
 		}
 	}
-	logTiming("newModel: %d items built", len(items))
+	logDebug("newModel: %d items built", len(items))
 
 	// Partition items so tmux sessions appear first
 	items = partitionItemsByTmux(items)
-	logTiming("newModel: partitioned by tmux")
+	logDebug("newModel: partitioned by tmux")
 
 	// Build worktree groups and create collapsed display items
 	worktreeGroups := buildWorktreeGroups(items, worktreeDefaults)
-	logTiming("newModel: %d worktree groups built", len(worktreeGroups))
+	logDebug("newModel: %d worktree groups built", len(worktreeGroups))
 	displayItems := buildDisplayItems(items, worktreeGroups, "")
-	logTiming("newModel: %d display items built", len(displayItems))
+	logDebug("newModel: %d display items built", len(displayItems))
 
 	// Create model instance first (we need to pass processInfo pointer to delegate)
 	// width/height start at 0 — View() returns "" until WindowSizeMsg arrives,
@@ -175,7 +175,7 @@ func newModel(
 		repoFocusFilter:  "",
 	}
 
-	logTiming("newModel: creating list widget")
+	logDebug("newModel: creating list widget")
 
 	// Create list with items using compact delegate
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
@@ -234,12 +234,12 @@ func newModel(
 	m.previewPort = vp
 	m.keys = DefaultKeyMap
 
-	logTiming("newModel: complete")
+	logDebug("newModel: complete")
 	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	logTiming("Init() called with %d sessions", len(m.sessions.OrderedIndex))
+	logDebug("Init() called with %d sessions", len(m.sessions.OrderedIndex))
 
 	// Start with filter active and load preview for first session
 	cmds := []tea.Cmd{
@@ -251,7 +251,7 @@ func (m Model) Init() tea.Cmd {
 	// Load preview for first item if available
 	if m.list.SelectedItem() != nil {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
-			logTiming("Init: queuing preview load for %q", item.session.Name)
+			logDebug("Init: queuing preview load for %q", item.session.Name)
 			cmds = append(cmds, loadPreview(m.previewer, item.session))
 		}
 	}

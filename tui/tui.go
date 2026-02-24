@@ -42,7 +42,7 @@ func NewTUI(
 
 func (t *TUI) Run() (string, error) {
 	resetStartTime()
-	logTiming("Run() entered")
+	logDebug("Run() entered")
 
 	// Load sessions synchronously (fast: ~10-15ms parallel)
 	sessions, err := t.lister.List(lister.ListOptions{
@@ -51,21 +51,21 @@ func (t *TUI) Run() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	logTiming("lister.List() done (%d sessions)", len(sessions.OrderedIndex))
+	logDebug("lister.List() done (%d sessions)", len(sessions.OrderedIndex))
 
 	// Load worktree defaults (sub-millisecond, never fails)
 	defaultsPath := state.DefaultsPath(os.Getenv("XDG_STATE_HOME"))
 	worktreeDefaults, _ := state.LoadDefaults(defaultsPath)
-	logTiming("state.LoadDefaults() done")
+	logDebug("state.LoadDefaults() done")
 
 	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath)
-	logTiming("newModel() done")
+	logDebug("newModel() done")
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	logTiming("tea.NewProgram() created, calling p.Run()")
+	logDebug("tea.NewProgram() created, calling p.Run()")
 
 	result, err := p.Run()
-	logTiming("p.Run() returned")
+	logDebug("p.Run() returned")
 	flushDebugLog()
 
 	if err != nil {
