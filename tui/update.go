@@ -543,13 +543,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var repoName, branchName string
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
-				if item.session.Src != "projects" && item.session.Src != "tmux" {
-					return m, nil
-				}
 				if strings.Contains(item.session.Name, "/") {
 					parts := strings.SplitN(item.session.Name, "/", 2)
-					repoName = parts[0]
-					branchName = parts[1]
+					repo := parts[0]
+					if _, isGrouped := m.worktreeGroups[repo]; isGrouped {
+						repoName = repo
+						branchName = parts[1]
+					}
 				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
 					// Bare repo item in a worktree group — clear default
 					repoName = item.session.Name
@@ -612,6 +612,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case sessionItem:
 				if strings.Contains(item.session.Name, "/") {
 					repoName = strings.SplitN(item.session.Name, "/", 2)[0]
+				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
+					repoName = item.session.Name
 				}
 			case worktreeGroupItem:
 				repoName = item.repoName
