@@ -35,7 +35,7 @@ func (m Model) View() string {
 
 	viewCount++
 	if viewCount <= 3 {
-		logTiming("View() call #%d", viewCount)
+		logDebug("View() call #%d", viewCount)
 	}
 
 	// Two columns: list on left (with built-in title), preview on right
@@ -50,7 +50,7 @@ func (m Model) View() string {
 	constrained := constrainedStyle.MaxWidth(m.width).Render(columns)
 
 	if viewCount <= 3 {
-		logTiming("View() call #%d rendered", viewCount)
+		logDebug("View() call #%d rendered", viewCount)
 	}
 
 	return constrained

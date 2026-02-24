@@ -6,7 +6,6 @@ type FilterType int
 
 const (
 	FilterAll FilterType = iota
-	FilterTmux
 	FilterConfig
 	FilterZoxide
 )

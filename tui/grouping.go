@@ -251,15 +251,33 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				result = append(result, groupItem)
 
 				// If expanded, show all unique worktrees below
+				// Skip the default branch — it's already represented in the group header
 				if expandedGroup == repoName {
 					for _, wt := range gi.uniqueItems {
+						if group.defaultBranch != "" && strings.Contains(wt.session.Name, "/") {
+							branch := strings.SplitN(wt.session.Name, "/", 2)[1]
+							if branch == group.defaultBranch {
+								continue
+							}
+						}
 						result = append(result, wt)
 					}
 				}
 				continue
 			}
 		} else {
-			result = append(result, item)
+			// Non-tmux/non-projects items (e.g. zoxide): skip if they match an
+			// already-inserted worktree group to avoid duplicates
+			var matchesGroup bool
+			if strings.Contains(si.session.Name, "/") {
+				repo := strings.SplitN(si.session.Name, "/", 2)[0]
+				matchesGroup = insertedGroups[repo]
+			} else {
+				matchesGroup = insertedGroups[si.session.Name]
+			}
+			if !matchesGroup {
+				result = append(result, item)
+			}
 		}
 	}
 

@@ -73,11 +73,12 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			}
 		}
 
-		// When group is expanded, show default indicator after default branch name
+		// When group is expanded, show short branch names for dormant items
+		// and default star indicator for the default branch
 		if d.expandedGroup != nil && *d.expandedGroup != "" &&
 			strings.Contains(v.session.Name, "/") {
 			repoName := strings.SplitN(v.session.Name, "/", 2)[0]
-			if repoName == *d.expandedGroup {
+			if repoName == *d.expandedGroup && v.groupRepo == "" {
 				branchName := strings.SplitN(v.session.Name, "/", 2)[1]
 				isDefault := false
 				if d.worktreeDefaults != nil {
@@ -85,7 +86,16 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 						isDefault = true
 					}
 				}
-				if isDefault {
+
+				// Dormant items (not active tmux): show short branch name only
+				if v.session.Src != "tmux" {
+					if isDefault {
+						str = v.iconPrefix + defaultStarStr + " ⎇ " + branchName
+					} else {
+						str = v.iconPrefix + "⎇ " + branchName
+					}
+				} else if isDefault {
+					// Active tmux: keep full name but add star
 					namePart := strings.TrimPrefix(str, v.iconPrefix)
 					str = v.iconPrefix + defaultStarStr + " " + namePart
 				}

@@ -610,6 +610,63 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 	})
 }
 
+func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
+	t.Run("expanded dormant group with default does not duplicate default branch", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "chase-search/feature-cdk", Src: "projects"}, displayName: " chase-search ⎇ feature-cdk"},
+			sessionItem{session: model.SeshSession{Name: "chase-search/review", Src: "projects"}, displayName: " chase-search ⎇ review"},
+			sessionItem{session: model.SeshSession{Name: "chase-search/develop", Src: "projects"}, displayName: " chase-search ⎇ develop"},
+			sessionItem{session: model.SeshSession{Name: "chase-search/regression-testing", Src: "projects"}, displayName: " chase-search ⎇ regression-testing"},
+			sessionItem{session: model.SeshSession{Name: "chase-search", Src: "projects"}, displayName: " chase-search"},
+		}
+
+		defaults := map[string]string{"chase-search": "feature-cdk"}
+		groups := buildWorktreeGroups(items, defaults)
+		display := buildDisplayItems(items, groups, "chase-search") // expanded
+
+		// Group header + 4 children (review, develop, regression-testing, chase-search bare)
+		// feature-cdk is already in the group header — should NOT appear again
+		if len(display) != 5 {
+			names := describeItems(display)
+			t.Fatalf("expected 5 items (1 group + 4 children), got %d: %v", len(display), names)
+		}
+
+		// First should be group item
+		gi, ok := display[0].(worktreeGroupItem)
+		if !ok {
+			t.Fatalf("expected first item to be worktreeGroupItem, got %T", display[0])
+		}
+		if gi.defaultBranch != "feature-cdk" {
+			t.Errorf("expected default 'feature-cdk', got %q", gi.defaultBranch)
+		}
+
+		// Remaining items should NOT include feature-cdk
+		for i, item := range display[1:] {
+			si := item.(sessionItem)
+			if si.session.Name == "chase-search/feature-cdk" {
+				t.Errorf("item %d: feature-cdk should not appear in expanded list (already in group header)", i+1)
+			}
+		}
+	})
+
+	t.Run("expanded dormant group without default shows all items", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}, displayName: " repo ⎇ main"},
+			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "projects"}, displayName: " repo ⎇ develop"},
+			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
+		}
+
+		groups := buildWorktreeGroups(items, make(map[string]string)) // no defaults
+		display := buildDisplayItems(items, groups, "repo")           // expanded
+
+		// Group header + 3 children (no default to skip)
+		if len(display) != 4 {
+			names := describeItems(display)
+			t.Fatalf("expected 4 items (1 group + 3 children), got %d: %v", len(display), names)
+		}
+	})
+}
+
 // describeItems is a test helper that returns a human-readable list of items
 func describeItems(items []list.Item) []string {
 	names := make([]string, 0, len(items))
