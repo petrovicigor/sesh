@@ -582,38 +582,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				(*m.worktreeDefaults)[repoName] = branchName
 			}
 
-			// Rebuild groups with updated defaults
+			// Rebuild groups with updated defaults, preserve expanded state
+			cursorIndex := m.list.Index()
 			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults)
-			*m.expandedGroup = ""
-			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup)
 
-			m.list.ResetFilter()
-			m.lastFilter = "" // Prevent filter transition from overwriting items
+			// Swap items in-place without leaving filter mode
+			m.lastFilter = ""
 			m.list.SetItems(displayItems)
 			m.list.Filter = tmuxFirstFilter(displayItems)
+			m.list.SetFilterText("")
+			m.list.SetFilterState(list.Filtering)
+			m.list.SetSize(m.list.Width(), m.list.Height())
 
-			// Find the group item to position cursor on
-			targetIndex := 0
-			for i, listItem := range displayItems {
-				if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
-					targetIndex = i
-					break
-				}
+			// Restore cursor position (clamped to new item count)
+			if cursorIndex >= len(displayItems) {
+				cursorIndex = len(displayItems) - 1
 			}
-			m.previewPort.SetContent("")
-			m.previewContent = ""
+			m.list.Select(cursorIndex)
 
-			// Sequence: enter filter mode, then set cursor + async save
-			seqCmd := tea.Sequence(
-				func() tea.Msg {
-					return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-				},
-				func() tea.Msg {
-					return setCursorMsg{index: targetIndex}
-				},
-			)
-			saveCmd := saveDefaults(m.defaultsPath, *m.worktreeDefaults)
-			return m, tea.Batch(seqCmd, saveCmd)
+			return m, saveDefaults(m.defaultsPath, *m.worktreeDefaults)
 
 		case key.Matches(msg, m.keys.RepoFocus):
 			// Determine repo name from selected item

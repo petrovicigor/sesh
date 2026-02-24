@@ -278,16 +278,9 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				result = append(result, groupItem)
 
 				// If expanded, show all unique worktrees below
-				// Skip the default branch — it's already represented in the group header
 				if expandedGroup == repoName {
 					children := make([]sessionItem, 0, len(gi.uniqueItems))
 					for _, wt := range gi.uniqueItems {
-						if group.defaultBranch != "" && strings.Contains(wt.session.Name, "/") {
-							branch := strings.SplitN(wt.session.Name, "/", 2)[1]
-							if branch == group.defaultBranch {
-								continue
-							}
-						}
 						children = append(children, wt)
 					}
 					children = sortBareRootFirst(children, repoName)

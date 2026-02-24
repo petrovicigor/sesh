@@ -87,7 +87,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		if !v.bareRoot && d.expandedGroup != nil && *d.expandedGroup != "" &&
 			strings.Contains(v.session.Name, "/") {
 			repoName := strings.SplitN(v.session.Name, "/", 2)[0]
-			if repoName == *d.expandedGroup && v.groupRepo == "" {
+			if repoName == *d.expandedGroup {
 				branchName := strings.SplitN(v.session.Name, "/", 2)[1]
 				isDefault := false
 				if d.worktreeDefaults != nil {
