@@ -85,10 +85,11 @@ type Recent interface {
 
 type RealRecent struct {
 	configDir string
+	stateDir  string
 }
 
-func NewRecent(configDir string) Recent {
-	return &RealRecent{configDir: configDir}
+func NewRecent(configDir, stateDir string) Recent {
+	return &RealRecent{configDir: configDir, stateDir: stateDir}
 }
 
 // computeFrecency computes the frecency score for a single entry.
@@ -189,13 +190,32 @@ func (r *RealRecent) GetFrecencyScores() map[string]float64 {
 	return scores
 }
 
-func (r *RealRecent) filePath() string {
+func (r *RealRecent) stateFilePath() string {
+	return filepath.Join(r.stateDir, recentFileName)
+}
+
+func (r *RealRecent) configFilePath() string {
 	return filepath.Join(r.configDir, recentFileName)
 }
 
 func (r *RealRecent) load() (*RecentSessions, error) {
-	path := r.filePath()
-	data, err := os.ReadFile(path)
+	// Try state dir first (new location)
+	statePath := r.stateFilePath()
+	data, err := os.ReadFile(statePath)
+	if err == nil {
+		var sessions RecentSessions
+		if err := json.Unmarshal(data, &sessions); err != nil {
+			return nil, err
+		}
+		if sessions.Sessions == nil {
+			sessions.Sessions = make(map[string]SessionEntry)
+		}
+		return &sessions, nil
+	}
+
+	// Fall back to config dir (old location) for backward compatibility
+	configPath := r.configFilePath()
+	data, err = os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +233,8 @@ func (r *RealRecent) load() (*RecentSessions, error) {
 }
 
 func (r *RealRecent) save(sessions *RecentSessions) error {
-	path := r.filePath()
+	// Always save to state dir (new location)
+	path := r.stateFilePath()
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)

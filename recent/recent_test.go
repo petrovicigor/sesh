@@ -11,7 +11,8 @@ import (
 func tempRecent(t *testing.T) *RealRecent {
 	t.Helper()
 	dir := t.TempDir()
-	return &RealRecent{configDir: dir}
+	stateDir := t.TempDir()
+	return &RealRecent{configDir: dir, stateDir: stateDir}
 }
 
 func TestRecordSessionNewEntry(t *testing.T) {
@@ -357,7 +358,7 @@ func TestNewFormatJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(r.configDir, recentFileName))
+	data, err := os.ReadFile(filepath.Join(r.stateDir, recentFileName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,4 +388,72 @@ func TestNewFormatJSON(t *testing.T) {
 	if entry.T == "" {
 		t.Error("expected non-empty timestamp")
 	}
+}
+
+func TestStateDirMigration(t *testing.T) {
+	t.Run("reads from configDir when stateDir empty", func(t *testing.T) {
+		configDir := t.TempDir()
+		stateDir := t.TempDir()
+		r := &RealRecent{configDir: configDir, stateDir: stateDir}
+
+		// Write data to old configDir location
+		oldData := `{"sessions":{"migrated-session":"2026-01-15T10:30:00Z"}}`
+		path := filepath.Join(configDir, recentFileName)
+		if err := os.WriteFile(path, []byte(oldData), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// load should find it in configDir
+		sessions, err := r.load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if _, ok := sessions.Sessions["migrated-session"]; !ok {
+			t.Error("expected to find 'migrated-session' from configDir fallback")
+		}
+	})
+
+	t.Run("prefers stateDir over configDir", func(t *testing.T) {
+		configDir := t.TempDir()
+		stateDir := t.TempDir()
+		r := &RealRecent{configDir: configDir, stateDir: stateDir}
+
+		// Write different data to both locations
+		oldData := `{"sessions":{"old-session":{"t":"2026-01-01T00:00:00Z","n":1}}}`
+		os.WriteFile(filepath.Join(configDir, recentFileName), []byte(oldData), 0644)
+
+		newData := `{"sessions":{"new-session":{"t":"2026-02-01T00:00:00Z","n":5}}}`
+		os.WriteFile(filepath.Join(stateDir, recentFileName), []byte(newData), 0644)
+
+		sessions, err := r.load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if _, ok := sessions.Sessions["new-session"]; !ok {
+			t.Error("expected to find 'new-session' from stateDir (preferred)")
+		}
+		if _, ok := sessions.Sessions["old-session"]; ok {
+			t.Error("should NOT find 'old-session' when stateDir has data")
+		}
+	})
+
+	t.Run("save writes to stateDir", func(t *testing.T) {
+		configDir := t.TempDir()
+		stateDir := t.TempDir()
+		r := &RealRecent{configDir: configDir, stateDir: stateDir}
+
+		if err := r.RecordSession("new-entry"); err != nil {
+			t.Fatal(err)
+		}
+
+		// File should exist in stateDir
+		if _, err := os.Stat(filepath.Join(stateDir, recentFileName)); os.IsNotExist(err) {
+			t.Error("expected file in stateDir")
+		}
+
+		// File should NOT exist in configDir
+		if _, err := os.Stat(filepath.Join(configDir, recentFileName)); !os.IsNotExist(err) {
+			t.Error("should not write to configDir")
+		}
+	})
 }
