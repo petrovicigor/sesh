@@ -317,15 +317,20 @@ func TestBuildDisplayItems(t *testing.T) {
 		groups := buildWorktreeGroups(items, make(map[string]string))
 		display := buildDisplayItems(items, groups, "")
 
-		if len(display) != 3 {
-			t.Fatalf("expected 3 items, got %d", len(display))
+		// sesh (tmux) + separator + chase-monorepo[group] + other-project = 4
+		if len(display) != 4 {
+			names := describeItems(display)
+			t.Fatalf("expected 4 items, got %d: %v", len(display), names)
 		}
 		if si, ok := display[0].(sessionItem); !ok || si.session.Name != "sesh" {
 			t.Errorf("expected first item to be 'sesh' sessionItem")
 		}
-		gi, ok := display[1].(worktreeGroupItem)
+		if _, ok := display[1].(separatorItem); !ok {
+			t.Errorf("expected separator at index 1, got %T", display[1])
+		}
+		gi, ok := display[2].(worktreeGroupItem)
 		if !ok {
-			t.Fatalf("expected second item to be worktreeGroupItem, got %T", display[1])
+			t.Fatalf("expected third item to be worktreeGroupItem, got %T", display[2])
 		}
 		if gi.repoName != "chase-monorepo" {
 			t.Errorf("expected repoName 'chase-monorepo', got %q", gi.repoName)
@@ -333,8 +338,8 @@ func TestBuildDisplayItems(t *testing.T) {
 		if gi.totalCount != 3 {
 			t.Errorf("expected totalCount 3, got %d", gi.totalCount)
 		}
-		if si, ok := display[2].(sessionItem); !ok || si.session.Name != "other-project" {
-			t.Errorf("expected third item to be 'other-project' sessionItem")
+		if si, ok := display[3].(sessionItem); !ok || si.session.Name != "other-project" {
+			t.Errorf("expected fourth item to be 'other-project' sessionItem")
 		}
 	})
 
@@ -526,12 +531,13 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 		groups := buildWorktreeGroups(items, make(map[string]string))
 		display := buildDisplayItems(items, groups, "")
 
-		// sesh, dotfiles, repo group, mydir = 4 items
-		if len(display) != 4 {
-			t.Fatalf("expected 4 items, got %d", len(display))
+		// sesh (tmux) + separator + dotfiles + repo group + mydir = 5 items
+		if len(display) != 5 {
+			names := describeItems(display)
+			t.Fatalf("expected 5 items, got %d: %v", len(display), names)
 		}
 
-		// Verify order
+		// Verify order including separator
 		names := []string{}
 		for _, item := range display {
 			switch v := item.(type) {
@@ -539,10 +545,12 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 				names = append(names, v.session.Name)
 			case worktreeGroupItem:
 				names = append(names, v.repoName+"[group]")
+			case separatorItem:
+				names = append(names, "[separator]")
 			}
 		}
 
-		expected := []string{"sesh", "dotfiles", "repo[group]", "mydir"}
+		expected := []string{"sesh", "[separator]", "dotfiles", "repo[group]", "mydir"}
 		for i, name := range names {
 			if name != expected[i] {
 				t.Errorf("position %d: expected %q, got %q", i, expected[i], name)
@@ -667,6 +675,171 @@ func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
 	})
 }
 
+func TestBuildDisplayItemsSeparator(t *testing.T) {
+	t.Run("separator between tmux and non-tmux items", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "sesh", Src: "tmux"}, displayName: " sesh"},
+			sessionItem{session: model.SeshSession{Name: "dotfiles", Src: "tmux"}, displayName: " dotfiles"},
+			sessionItem{session: model.SeshSession{Name: "myproject", Src: "projects"}, displayName: " myproject"},
+			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}, displayName: " mydir"},
+		}
+		groups := buildWorktreeGroups(items, make(map[string]string))
+		display := buildDisplayItems(items, groups, "")
+
+		if len(display) != 5 {
+			names := describeItems(display)
+			t.Fatalf("expected 5 items (2 tmux + separator + 2 non-tmux), got %d: %v", len(display), names)
+		}
+		if _, ok := display[2].(separatorItem); !ok {
+			t.Errorf("expected separatorItem at index 2, got %T", display[2])
+		}
+	})
+
+	t.Run("no separator when no tmux sessions", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "myproject", Src: "projects"}, displayName: " myproject"},
+			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}, displayName: " mydir"},
+		}
+		groups := buildWorktreeGroups(items, make(map[string]string))
+		display := buildDisplayItems(items, groups, "")
+
+		for _, item := range display {
+			if _, ok := item.(separatorItem); ok {
+				t.Error("should not have separator when no tmux sessions exist")
+			}
+		}
+	})
+
+	t.Run("no separator when only tmux sessions", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "sesh", Src: "tmux"}, displayName: " sesh"},
+			sessionItem{session: model.SeshSession{Name: "dotfiles", Src: "tmux"}, displayName: " dotfiles"},
+		}
+		groups := buildWorktreeGroups(items, make(map[string]string))
+		display := buildDisplayItems(items, groups, "")
+
+		for _, item := range display {
+			if _, ok := item.(separatorItem); ok {
+				t.Error("should not have separator when only tmux sessions exist")
+			}
+		}
+	})
+
+	t.Run("separator with worktree groups", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "tmux"}, displayName: " repo/main"},
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}, displayName: " repo ⎇ main"},
+			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "projects"}, displayName: " repo ⎇ develop"},
+			sessionItem{session: model.SeshSession{Name: "other", Src: "zoxide"}, displayName: " other"},
+		}
+		groups := buildWorktreeGroups(items, make(map[string]string))
+		display := buildDisplayItems(items, groups, "")
+
+		hasSeparator := false
+		for _, item := range display {
+			if _, ok := item.(separatorItem); ok {
+				hasSeparator = true
+			}
+		}
+		if !hasSeparator {
+			names := describeItems(display)
+			t.Errorf("expected separator between tmux group and non-tmux items: %v", names)
+		}
+	})
+}
+
+func TestBuildDisplayItemsSeparatorWithGroups(t *testing.T) {
+	t.Run("separator position with active and dormant groups", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "sesh", Src: "tmux"}, displayName: " sesh"},
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "tmux"}, displayName: " repo/main"},
+			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "tmux"}, displayName: " repo/develop"},
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}, displayName: " repo ⎇ main"},
+			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "projects"}, displayName: " repo ⎇ develop"},
+			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
+			sessionItem{session: model.SeshSession{Name: "other-project", Src: "projects"}, displayName: " other-project"},
+			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}, displayName: " mydir"},
+		}
+
+		groups := buildWorktreeGroups(items, make(map[string]string))
+		display := buildDisplayItems(items, groups, "")
+
+		// Count separators — should be exactly 1
+		sepCount := 0
+		sepIdx := -1
+		for i, item := range display {
+			if _, ok := item.(separatorItem); ok {
+				sepCount++
+				sepIdx = i
+			}
+		}
+		if sepCount != 1 {
+			names := describeItems(display)
+			t.Fatalf("expected exactly 1 separator, got %d in: %v", sepCount, names)
+		}
+
+		// Everything before separator should be tmux-sourced
+		for i := 0; i < sepIdx; i++ {
+			if si, ok := display[i].(sessionItem); ok {
+				if si.session.Src != "tmux" {
+					t.Errorf("item %d before separator is %s (expected tmux): %s", i, si.session.Src, si.session.Name)
+				}
+			}
+		}
+
+		// Everything after separator should be non-tmux
+		for i := sepIdx + 1; i < len(display); i++ {
+			if si, ok := display[i].(sessionItem); ok {
+				if si.session.Src == "tmux" {
+					t.Errorf("item %d after separator is tmux: %s", i, si.session.Name)
+				}
+			}
+		}
+	})
+
+	t.Run("separator with expanded active group", func(t *testing.T) {
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "tmux"}, displayName: " repo/main"},
+			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}, displayName: " repo ⎇ main"},
+			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "projects"}, displayName: " repo ⎇ develop"},
+			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
+			sessionItem{session: model.SeshSession{Name: "other", Src: "zoxide"}, displayName: " other"},
+		}
+
+		groups := buildWorktreeGroups(items, make(map[string]string))
+		// Expanded: dormant children appear after the tmux item
+		display := buildDisplayItems(items, groups, "repo")
+
+		// Separator should come after the expanded group (tmux + dormant children), before "other"
+		hasSeparator := false
+		for _, item := range display {
+			if _, ok := item.(separatorItem); ok {
+				hasSeparator = true
+			}
+		}
+		if !hasSeparator {
+			names := describeItems(display)
+			t.Errorf("expected separator after expanded group, got: %v", names)
+		}
+	})
+
+	t.Run("allItems never contains separator", func(t *testing.T) {
+		// Simulate what newModel does: build items, partition, but DON'T call buildDisplayItems
+		items := []list.Item{
+			sessionItem{session: model.SeshSession{Name: "sesh", Src: "tmux"}, displayName: " sesh"},
+			sessionItem{session: model.SeshSession{Name: "myproject", Src: "projects"}, displayName: " myproject"},
+		}
+		// allItems is set from partitioned items, NOT from buildDisplayItems
+		allItems := partitionItemsByTmux(items)
+
+		for i, item := range allItems {
+			if _, ok := item.(separatorItem); ok {
+				t.Errorf("allItems[%d] is a separatorItem — allItems should never contain separators", i)
+			}
+		}
+	})
+}
+
 // describeItems is a test helper that returns a human-readable list of items
 func describeItems(items []list.Item) []string {
 	names := make([]string, 0, len(items))
@@ -680,6 +853,8 @@ func describeItems(items []list.Item) []string {
 			names = append(names, desc)
 		case worktreeGroupItem:
 			names = append(names, v.repoName+"[group]")
+		case separatorItem:
+			names = append(names, "[separator]")
 		}
 	}
 	return names

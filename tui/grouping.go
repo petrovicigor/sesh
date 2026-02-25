@@ -311,5 +311,36 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 		}
 	}
 
+	// Insert separator between last active-tmux item and first non-tmux item.
+	// "Active tmux" includes: tmux sessions, expanded children of active groups.
+	lastTmuxIdx := -1
+	firstNonTmuxIdx := -1
+	for i, item := range result {
+		switch v := item.(type) {
+		case sessionItem:
+			if v.session.Src == "tmux" {
+				lastTmuxIdx = i
+			} else if v.groupChild && lastTmuxIdx >= 0 && firstNonTmuxIdx == -1 {
+				// Expanded children of active tmux groups stay with the tmux section,
+				// but only if we haven't passed into the non-tmux section yet.
+				lastTmuxIdx = i
+			} else if firstNonTmuxIdx == -1 && lastTmuxIdx >= 0 {
+				firstNonTmuxIdx = i
+			}
+		case worktreeGroupItem:
+			if firstNonTmuxIdx == -1 && lastTmuxIdx >= 0 {
+				firstNonTmuxIdx = i
+			}
+		}
+	}
+
+	if lastTmuxIdx >= 0 && firstNonTmuxIdx > lastTmuxIdx {
+		newResult := make([]list.Item, 0, len(result)+1)
+		newResult = append(newResult, result[:firstNonTmuxIdx]...)
+		newResult = append(newResult, separatorItem{})
+		newResult = append(newResult, result[firstNonTmuxIdx:]...)
+		result = newResult
+	}
+
 	return result
 }
