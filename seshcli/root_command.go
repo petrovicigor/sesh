@@ -24,6 +24,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/previewer"
 	"github.com/joshmedeski/sesh/v2/recent"
 	"github.com/joshmedeski/sesh/v2/replacer"
+	"github.com/joshmedeski/sesh/v2/state"
 	"github.com/joshmedeski/sesh/v2/runtimewrap"
 	"github.com/joshmedeski/sesh/v2/shell"
 	"github.com/joshmedeski/sesh/v2/startup"
@@ -67,7 +68,7 @@ func NewRootCommand(version string) *cobra.Command {
 
 	slog.Debug("seshcli/root_command.go: NewRootCommand", "version", version, "config", config)
 
-	// Get config directory for recent sessions tracking
+	// Get config directory for recent sessions tracking (old location, backward compat)
 	userConfigDir, err := os.UserConfigDir()
 	if err != nil {
 		// Fallback to ~/.config
@@ -76,10 +77,21 @@ func NewRootCommand(version string) *cobra.Command {
 	}
 	configDir := path.Join(userConfigDir, "sesh")
 
+	// Get state directory for recent sessions (new location)
+	seshHomeDir, _ := os.UserHomeDir()
+	xdgStateHome := os.Getenv("XDG_STATE_HOME")
+	var stateDir string
+	if xdgStateHome != "" {
+		stateDir = path.Join(xdgStateHome, "sesh")
+	} else {
+		stateDir = path.Join(seshHomeDir, ".local", "state", "sesh")
+	}
+
 	// core dependencies
-	recentTracker := recent.NewRecent(configDir)
+	recentTracker := recent.NewRecent(configDir, stateDir)
 	ls := ls.NewLs(config, shell)
-	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator, git, recentTracker)
+	excludesPath := state.ExcludesPath(xdgStateHome)
+	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator, git, recentTracker, excludesPath)
 	startup := startup.NewStartup(config, lister, tmux, home, replacer)
 	namer := namer.NewNamer(path, git, home, config)
 	connector := connector.NewConnector(config, dir, home, lister, namer, startup, tmux, zoxide, tmuxinator, recentTracker)

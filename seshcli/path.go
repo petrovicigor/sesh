@@ -21,6 +21,12 @@ func NewPathCommand(i icon.Icon, list lister.Lister) *cobra.Command {
 			name = i.RemoveIcon(name)
 
 			// Try to find the session in various sources (same order as connector)
+			// Workspace (before projects — more specific)
+			if session, exists := list.FindWorkspaceSession(name); exists {
+				fmt.Println(session.Path)
+				return nil
+			}
+
 			// Projects
 			if session, exists := list.FindProjectSession(name); exists {
 				fmt.Println(session.Path)

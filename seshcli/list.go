@@ -25,6 +25,7 @@ func NewListCommand(icon icon.Icon, json json.Json, list lister.Lister) *cobra.C
 			icons, _ := cmd.Flags().GetBool("icons")
 			tmuxinator, _ := cmd.Flags().GetBool("tmuxinator")
 			projects, _ := cmd.Flags().GetBool("projects")
+			workspace, _ := cmd.Flags().GetBool("workspace")
 			hideDuplicates, _ := cmd.Flags().GetBool("hide-duplicates")
 			withPath, _ := cmd.Flags().GetBool("with-path")
 
@@ -37,6 +38,7 @@ func NewListCommand(icon icon.Icon, json json.Json, list lister.Lister) *cobra.C
 				Zoxide:         zoxide,
 				Tmuxinator:     tmuxinator,
 				Projects:       projects,
+				Workspace:      workspace,
 				HideDuplicates: hideDuplicates,
 			})
 			if err != nil {
@@ -77,6 +79,7 @@ func NewListCommand(icon icon.Icon, json json.Json, list lister.Lister) *cobra.C
 	cmd.Flags().BoolP("icons", "i", false, "show icons")
 	cmd.Flags().BoolP("tmuxinator", "T", false, "show tmuxinator configs")
 	cmd.Flags().BoolP("projects", "p", false, "show project directories")
+	cmd.Flags().BoolP("workspace", "w", false, "show workspace sub-projects")
 	cmd.Flags().BoolP("hide-duplicates", "d", false, "hide duplicate entries")
 	cmd.Flags().Bool("with-path", false, "include path in output (tab-separated, for fzf --with-nth)")
 
