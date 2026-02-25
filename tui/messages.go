@@ -24,10 +24,6 @@ type DebounceTickMsg struct {
 	SessionName string
 }
 
-type setCursorMsg struct {
-	index int
-}
-
 type ProcessInfoMsg struct {
 	Processes map[string]string // session name -> process type ("node", etc)
 }

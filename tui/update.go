@@ -338,21 +338,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case setCursorMsg:
-		// Set cursor position and load preview
-		logDebug("DEBUG setCursorMsg: index=%d currentIndex=%d totalItems=%d", msg.index, m.list.Index(), len(m.list.Items()))
-		m.list.Select(msg.index)
-		logDebug("DEBUG setCursorMsg: after Select, index=%d", m.list.Index())
-		switch item := m.list.SelectedItem().(type) {
-		case sessionItem:
-			m.previewPort.SetContent("")
-			return m, loadPreview(m.previewer, item.session)
-		case worktreeGroupItem:
-			m.previewPort.SetContent("")
-			m.previewContent = ""
-		}
-		return m, nil
-
 	case tea.KeyMsg:
 		// Handle Ctrl+E for process detection
 		if key.Matches(msg, m.keys.DetectProcesses) {
@@ -572,16 +557,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Toggle focus
 			var targetIndex int
+			var displayItems []list.Item
 			if m.repoFocusFilter == repoName {
 				// Clear focus — restore normal view
 				m.repoFocusFilter = ""
 				*m.expandedGroup = ""
-				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
-
-				m.list.ResetFilter()
-				m.lastFilter = "" // Prevent filter transition from overwriting items
-				m.list.SetItems(displayItems)
-				m.list.Filter = tmuxFirstFilter(displayItems)
+				displayItems = buildDisplayItems(m.allItems, m.worktreeGroups, "")
 
 				for i, listItem := range displayItems {
 					if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
@@ -596,40 +577,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.repoFocusFilter = repoName
 				*m.expandedGroup = ""
 
-				focusedItems := make([]list.Item, 0)
+				displayItems = make([]list.Item, 0)
 				for _, item := range m.allItems {
 					if si, ok := item.(sessionItem); ok {
 						if strings.Contains(si.session.Name, "/") {
 							itemRepo := strings.SplitN(si.session.Name, "/", 2)[0]
 							if itemRepo == repoName {
-								focusedItems = append(focusedItems, item)
+								displayItems = append(displayItems, item)
 							}
 						} else if si.session.Name == repoName {
-							focusedItems = append(focusedItems, item)
+							displayItems = append(displayItems, item)
 						}
 					}
 				}
 
-				m.list.ResetFilter()
-				m.lastFilter = "" // Prevent filter transition from overwriting items
-				m.list.SetItems(focusedItems)
-				m.list.Filter = tmuxFirstFilter(focusedItems)
 				targetIndex = 0
-
 				m.list.Title = "🔍 " + repoName
 			}
 
+			// Swap items in-place without leaving filter mode — avoids layout shift
+			m.lastFilter = "" // Prevent filter transition from overwriting items
+			m.list.SetItems(displayItems)
+			m.list.Filter = tmuxFirstFilter(displayItems)
+			m.list.SetFilterText("")
+			m.list.SetFilterState(list.Filtering)
+			// SetFilterState doesn't call updatePagination(), but it changes titleView()
+			// height (filter input vs title). Force recalculation to prevent 1-line jump.
+			m.list.SetSize(m.list.Width(), m.list.Height())
+
+			m.list.Select(targetIndex)
+
+			// Load preview for target item
+			if targetIndex < len(displayItems) {
+				if item, ok := displayItems[targetIndex].(sessionItem); ok {
+					return m, loadPreview(m.previewer, item.session)
+				}
+			}
 			m.previewPort.SetContent("")
 			m.previewContent = ""
-
-			return m, tea.Sequence(
-				func() tea.Msg {
-					return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
-				},
-				func() tea.Msg {
-					return setCursorMsg{index: targetIndex}
-				},
-			)
+			return m, nil
 		}
 
 		// When filtering, intercept arrow keys and handle them ourselves
