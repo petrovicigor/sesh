@@ -380,10 +380,6 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 	if isActive && status != "idle" && status != "" {
 		parts := strings.Split(status, ":")
 		statusType := parts[0]
-		toolName := ""
-		if len(parts) > 1 {
-			toolName = parts[1]
-		}
 
 		yellow := colorYellow
 		magenta := colorMagenta
@@ -395,9 +391,9 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		if status == "thinking" {
 			statusDisplay = fmt.Sprintf("%s🔮%s ", yellow, colorReset)
 		} else if statusType == "running" {
-			statusDisplay = fmt.Sprintf("%s🔧 %s%s ", yellow, toolName, colorReset)
+			statusDisplay = fmt.Sprintf("%s🔧%s ", yellow, colorReset)
 		} else if statusType == "awaiting" {
-			statusDisplay = fmt.Sprintf("%s🖐️ %s%s ", magenta, toolName, colorReset)
+			statusDisplay = fmt.Sprintf("%s🖐️%s ", magenta, colorReset)
 		}
 	}
 

@@ -140,6 +140,21 @@ func saveDefaults(path string, defaults map[string]string) tea.Cmd {
 	}
 }
 
+// saveExcludes writes workspace excludes to disk asynchronously
+func saveExcludes(path string, excludes map[string][]string) tea.Cmd {
+	// Copy the map to avoid concurrent access
+	copied := make(map[string][]string, len(excludes))
+	for k, v := range excludes {
+		vCopy := make([]string, len(v))
+		copy(vCopy, v)
+		copied[k] = vCopy
+	}
+	return func() tea.Msg {
+		err := state.SaveExcludes(path, copied)
+		return ExcludesSavedMsg{Err: err}
+	}
+}
+
 // detectAllProcesses runs a single tmux command to detect processes in all sessions
 func detectAllProcesses() tea.Cmd {
 	return func() tea.Msg {

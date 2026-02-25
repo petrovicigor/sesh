@@ -51,7 +51,7 @@ func BenchmarkSeshFilter(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := seshFilter(items, nil)
+	filter := seshFilter(items, nil, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = filter("ses", targets)
@@ -77,7 +77,7 @@ func BenchmarkSeshFilterSmall(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := seshFilter(items, nil)
+	filter := seshFilter(items, nil, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = filter("ses", targets)
@@ -116,7 +116,7 @@ func BenchmarkFilterNoMatches(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := seshFilter(items, nil)
+	filter := seshFilter(items, nil, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Search for something that doesn't exist
@@ -142,7 +142,7 @@ func BenchmarkFilterAllMatches(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := seshFilter(items, nil)
+	filter := seshFilter(items, nil, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Search for something that matches everything

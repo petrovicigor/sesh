@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/joshmedeski/sesh/v2/state"
 )
 
 // loadPreviewDebounced handles preview loading with debouncing
@@ -42,12 +44,12 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	}
 
 	*m.expandedGroup = repoName
-	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup)
+	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup, m.workspacePrefixes)
 
 	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
-	m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+	m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -73,21 +75,14 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 			}
 			if foundBadgeOrHeader {
 				// Match worktree items (repo/branch) or bare repo items (exact name match)
-				if strings.Contains(v.session.Name, "/") {
-					itemRepo := strings.SplitN(v.session.Name, "/", 2)[0]
-					if itemRepo == repoName {
-						targetIndex = i
-						goto found
-					}
-				} else if v.session.Name == repoName {
+				if strings.HasPrefix(v.session.Name, repoName+"/") || v.session.Name == repoName {
 					targetIndex = i
 					goto found
 				}
 			}
 			// For active groups with no dormant: target first active item
 			if group != nil && !foundBadgeOrHeader && strings.Contains(v.session.Name, "/") {
-				itemRepo := strings.SplitN(v.session.Name, "/", 2)[0]
-				if itemRepo == repoName && !group.tmuxNames[v.session.Name] {
+				if strings.HasPrefix(v.session.Name, repoName+"/") && !group.tmuxNames[v.session.Name] {
 					targetIndex = i
 					goto found
 				}
@@ -125,12 +120,12 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	}
 
 	*m.expandedGroup = ""
-	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes)
 
 	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
-	m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+	m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -160,6 +155,163 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// enterWorkspaceManager enters workspace manager mode, showing toggle checkboxes.
+func (m Model) enterWorkspaceManager() (Model, tea.Cmd) {
+	// No-op if no workspace configs
+	if len(m.config.WorkspaceConfigs) == 0 {
+		return m, nil
+	}
+
+	// Discover all sub-projects (config excludes applied, NOT state excludes)
+	subProjects := m.lister.ListWorkspaceSubProjects()
+	if len(subProjects) == 0 {
+		return m, nil
+	}
+
+	// Load current state excludes
+	excludes, _ := state.LoadExcludes(m.excludesPath)
+
+	m.workspaceManagerMode = true
+	m.workspaceSubProjects = subProjects
+	m.workspaceExcludes = excludes
+
+	// Build toggle items
+	toggleItems := buildWorkspaceToggleItems(subProjects, excludes)
+
+	// Swap list items
+	m.lastFilter = ""
+	m.list.SetItems(toggleItems)
+	m.list.Filter = list.DefaultFilter
+	m.list.SetFilterText("")
+	m.list.SetFilterState(list.Filtering)
+	m.list.SetSize(m.list.Width(), m.list.Height())
+	m.list.Title = "📦 Workspace Manager"
+	m.list.Select(0)
+
+	// Clear preview
+	m.previewPort.SetContent("")
+	m.previewContent = ""
+
+	return m, nil
+}
+
+// exitWorkspaceManager exits workspace manager mode, saves excludes, and reloads sessions.
+func (m Model) exitWorkspaceManager() (Model, tea.Cmd) {
+	m.workspaceManagerMode = false
+	m.workspaceSubProjects = nil
+
+	// Save excludes and reload sessions
+	saveCmd := saveExcludes(m.excludesPath, m.workspaceExcludes)
+	reloadCmd := loadSessionsWithFilter(m.lister, m.currentFilter)
+
+	// Restore title
+	m.list.Title = getFilterTitle(m.currentFilter)
+
+	return m, tea.Batch(saveCmd, reloadCmd)
+}
+
+// toggleWorkspaceItem toggles the excluded state of the selected workspace item.
+func (m Model) toggleWorkspaceItem() (Model, tea.Cmd) {
+	item, ok := m.list.SelectedItem().(workspaceToggleItem)
+	if !ok {
+		return m, nil
+	}
+
+	cursorIndex := m.list.Index()
+
+	// Deep-copy the excludes map to preserve Elm architecture value semantics.
+	// Maps are reference types, so mutating in-place would affect the original model.
+	copied := make(map[string][]string, len(m.workspaceExcludes))
+	for k, v := range m.workspaceExcludes {
+		copied[k] = append([]string(nil), v...)
+	}
+	m.workspaceExcludes = copied
+
+	// Toggle excluded state
+	if item.excluded {
+		// Remove from excludes
+		if excludes, exists := m.workspaceExcludes[item.workspaceName]; exists {
+			filtered := make([]string, 0, len(excludes))
+			for _, sp := range excludes {
+				if sp != item.subProject {
+					filtered = append(filtered, sp)
+				}
+			}
+			if len(filtered) == 0 {
+				delete(m.workspaceExcludes, item.workspaceName)
+			} else {
+				m.workspaceExcludes[item.workspaceName] = filtered
+			}
+		}
+	} else {
+		// Add to excludes
+		if m.workspaceExcludes == nil {
+			m.workspaceExcludes = make(map[string][]string)
+		}
+		m.workspaceExcludes[item.workspaceName] = append(m.workspaceExcludes[item.workspaceName], item.subProject)
+	}
+
+	// Rebuild toggle items
+	toggleItems := buildWorkspaceToggleItems(m.workspaceSubProjects, m.workspaceExcludes)
+	filterText := m.list.FilterValue()
+
+	m.lastFilter = filterText
+	m.list.SetItems(toggleItems)
+	m.list.Filter = list.DefaultFilter
+	m.list.SetFilterText(filterText)
+	m.list.SetFilterState(list.Filtering)
+	m.list.SetSize(m.list.Width(), m.list.Height())
+
+	// Restore cursor position
+	if cursorIndex >= len(m.list.VisibleItems()) {
+		cursorIndex = len(m.list.VisibleItems()) - 1
+	}
+	if cursorIndex < 0 {
+		cursorIndex = 0
+	}
+	m.list.Select(cursorIndex)
+
+	return m, nil
+}
+
+// buildWorkspaceToggleItems creates toggle items from discovered sub-projects and excludes.
+func buildWorkspaceToggleItems(subProjects map[string][]string, excludes map[string][]string) []list.Item {
+	items := make([]list.Item, 0)
+
+	// Build exclude lookup
+	excludeSet := make(map[string]map[string]bool)
+	for wsName, paths := range excludes {
+		excludeSet[wsName] = make(map[string]bool, len(paths))
+		for _, p := range paths {
+			excludeSet[wsName][p] = true
+		}
+	}
+
+	// Sort workspace names for stable ordering
+	wsNames := make([]string, 0, len(subProjects))
+	for name := range subProjects {
+		wsNames = append(wsNames, name)
+	}
+	slices.Sort(wsNames)
+
+	for _, wsName := range wsNames {
+		sps := subProjects[wsName]
+		for _, sp := range sps {
+			excluded := false
+			if ws, ok := excludeSet[wsName]; ok {
+				excluded = ws[sp]
+			}
+			items = append(items, workspaceToggleItem{
+				workspaceName: wsName,
+				subProject:    sp,
+				excluded:      excluded,
+			})
+		}
+	}
+
+	return items
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -211,15 +363,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Build worktree groups
 		m.allItems = items
-		m.worktreeGroups = buildWorktreeGroups(items, *m.worktreeDefaults)
+		m.worktreeGroups = buildWorktreeGroups(items, *m.worktreeDefaults, m.workspacePrefixes)
 		*m.expandedGroup = ""
 
 		// Use collapsed display items
-		displayItems := buildDisplayItems(items, m.worktreeGroups, "")
+		displayItems := buildDisplayItems(items, m.worktreeGroups, "", m.workspacePrefixes)
 		m.list.SetItems(displayItems)
 
 		// Update filter function with display items
-		m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+		m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
 
 		// Update title based on current filter
 		m.list.Title = getFilterTitle(m.currentFilter)
@@ -338,11 +490,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case ExcludesSavedMsg:
+		if msg.Err != nil {
+			logDebug("DEBUG: Failed to save excludes: %v", msg.Err)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// Handle Ctrl+E for process detection
 		if key.Matches(msg, m.keys.DetectProcesses) {
 			logDebug("DEBUG: Ctrl+E pressed, triggering process detection")
 			return m, detectAllProcesses()
+		}
+
+		// Handle Ctrl+W for workspace manager
+		if key.Matches(msg, m.keys.WorkspaceManager) {
+			if m.workspaceManagerMode {
+				return m.exitWorkspaceManager()
+			}
+			return m.enterWorkspaceManager()
+		}
+
+		// Handle workspace manager mode keys
+		if m.workspaceManagerMode {
+			switch {
+			case key.Matches(msg, m.keys.Quit):
+				// Escape exits manager mode; ctrl+c/ctrl+b quit entirely
+				if msg.Type == tea.KeyEscape {
+					return m.exitWorkspaceManager()
+				}
+				return m, tea.Quit
+			case key.Matches(msg, m.keys.Select) || msg.String() == " ":
+				return m.toggleWorkspaceItem()
+			}
+			// Fall through to normal key handling (up/down, typing)
 		}
 
 		// Handle Tab for group expand/collapse
@@ -356,9 +537,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item.groupRepo != "" {
 					targetGroup = item.groupRepo
 				} else if strings.Contains(item.session.Name, "/") {
-					repo := strings.SplitN(item.session.Name, "/", 2)[0]
-					if _, isGrouped := m.worktreeGroups[repo]; isGrouped {
-						targetGroup = repo
+					groupKey := groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes)
+					if _, isGrouped := m.worktreeGroups[groupKey]; isGrouped {
+						targetGroup = groupKey
 					}
 				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
 					targetGroup = item.session.Name
@@ -488,11 +669,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				if strings.Contains(item.session.Name, "/") {
-					parts := strings.SplitN(item.session.Name, "/", 2)
-					repo := parts[0]
-					if _, isGrouped := m.worktreeGroups[repo]; isGrouped {
-						repoName = repo
-						branchName = parts[1]
+					groupKey := groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes)
+					if _, isGrouped := m.worktreeGroups[groupKey]; isGrouped {
+						repoName = groupKey
+						branchName = item.session.Name[len(groupKey)+1:]
 					}
 				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
 					// Bare repo item in a worktree group — clear default
@@ -518,13 +698,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Rebuild groups with updated defaults, preserve expanded state
 			cursorIndex := m.list.Index()
-			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults)
-			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup)
+			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults, m.workspacePrefixes)
+			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup, m.workspacePrefixes)
 
 			// Swap items in-place without leaving filter mode
 			m.lastFilter = ""
 			m.list.SetItems(displayItems)
-			m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
 			m.list.SetSize(m.list.Width(), m.list.Height())
@@ -543,7 +723,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				if strings.Contains(item.session.Name, "/") {
-					repoName = strings.SplitN(item.session.Name, "/", 2)[0]
+					repoName = groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes)
 				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
 					repoName = item.session.Name
 				}
@@ -562,7 +742,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Clear focus — restore normal view
 				m.repoFocusFilter = ""
 				*m.expandedGroup = ""
-				displayItems = buildDisplayItems(m.allItems, m.worktreeGroups, "")
+				displayItems = buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes)
 
 				for i, listItem := range displayItems {
 					if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
@@ -580,12 +760,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				displayItems = make([]list.Item, 0)
 				for _, item := range m.allItems {
 					if si, ok := item.(sessionItem); ok {
-						if strings.Contains(si.session.Name, "/") {
-							itemRepo := strings.SplitN(si.session.Name, "/", 2)[0]
-							if itemRepo == repoName {
-								displayItems = append(displayItems, item)
-							}
-						} else if si.session.Name == repoName {
+						if strings.HasPrefix(si.session.Name, repoName+"/") || si.session.Name == repoName {
 							displayItems = append(displayItems, item)
 						}
 					}
@@ -598,7 +773,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Swap items in-place without leaving filter mode — avoids layout shift
 			m.lastFilter = "" // Prevent filter transition from overwriting items
 			m.list.SetItems(displayItems)
-			m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
 			// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -670,7 +845,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if prevFilter == "" && currentFilter != "" {
 				// Swap to full items for fuzzy search
 				*m.expandedGroup = ""
-				m.list.Filter = seshFilter(m.allItems, m.frecencyScores)
+				m.list.Filter = seshFilter(m.allItems, m.frecencyScores, m.workspacePrefixes)
 				m.list.SetItems(m.allItems)
 				// Re-apply filter text after item swap
 				m.list.SetFilterText(currentFilter)
@@ -681,9 +856,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Must return early to avoid the stale async filter command from
 			// m.list.Update(msg) overriding our grouped displayItems.
 			if prevFilter != "" && currentFilter == "" {
-				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
+				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes)
 				m.list.SetItems(displayItems)
-				m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+				m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
 				m.list.SetFilterText("")
 				m.list.SetFilterState(list.Filtering)
 				m.list.SetSize(m.list.Width(), m.list.Height())

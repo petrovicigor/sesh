@@ -32,10 +32,21 @@ var (
 // It tries stripping the transformed name (with ⎇) first, then the raw session name.
 func extractIconPrefix(displayName, sessionName string) string {
 	if strings.Contains(sessionName, "/") {
+		// Try first-slash split (regular projects: "geoip/develop" → "geoip ⎇ develop")
 		parts := strings.SplitN(sessionName, "/", 2)
 		transformed := parts[0] + " ⎇ " + parts[1]
 		if prefix := strings.TrimSuffix(displayName, transformed); prefix != displayName {
 			return prefix
+		}
+		// Try last-slash split (workspace: "mono/packages/box-api/develop" → "mono/packages/box-api ⎇ develop")
+		lastSlash := strings.LastIndex(sessionName, "/")
+		if lastSlash != strings.Index(sessionName, "/") { // only if multiple slashes
+			subProject := sessionName[:lastSlash]
+			branch := sessionName[lastSlash+1:]
+			transformed2 := subProject + " ⎇ " + branch
+			if prefix := strings.TrimSuffix(displayName, transformed2); prefix != displayName {
+				return prefix
+			}
 		}
 	}
 	if prefix := strings.TrimSuffix(displayName, sessionName); prefix != displayName {
@@ -132,29 +143,28 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		// When group is expanded, show short branch names for dormant items
 		// and default star indicator for the default branch
 		if !v.bareRoot && d.expandedGroup != nil && *d.expandedGroup != "" &&
-			strings.Contains(v.session.Name, "/") {
-			repoName := strings.SplitN(v.session.Name, "/", 2)[0]
-			if repoName == *d.expandedGroup {
-				branchName := strings.SplitN(v.session.Name, "/", 2)[1]
-				isDefault := false
-				if d.worktreeDefaults != nil {
-					if defaultBranch, ok := (*d.worktreeDefaults)[repoName]; ok && defaultBranch == branchName {
-						isDefault = true
-					}
+			strings.Contains(v.session.Name, "/") &&
+			strings.HasPrefix(v.session.Name, *d.expandedGroup+"/") {
+			repoName := *d.expandedGroup
+			branchName := v.session.Name[len(repoName)+1:]
+			isDefault := false
+			if d.worktreeDefaults != nil {
+				if defaultBranch, ok := (*d.worktreeDefaults)[repoName]; ok && defaultBranch == branchName {
+					isDefault = true
 				}
+			}
 
-				// Dormant items (not active tmux): show short branch name only
-				if v.session.Src != "tmux" {
-					if isDefault {
-						str = v.iconPrefix + defaultStarStr + " ⎇ " + branchName
-					} else {
-						str = v.iconPrefix + "⎇ " + branchName
-					}
-				} else if isDefault {
-					// Active tmux: keep full name but add star
-					namePart := strings.TrimPrefix(str, v.iconPrefix)
-					str = v.iconPrefix + defaultStarStr + " " + namePart
+			// Dormant items (not active tmux): show short branch name only
+			if v.session.Src != "tmux" {
+				if isDefault {
+					str = v.iconPrefix + defaultStarStr + " ⎇ " + branchName
+				} else {
+					str = v.iconPrefix + "⎇ " + branchName
 				}
+			} else if isDefault {
+				// Active tmux: keep full name but add star
+				namePart := strings.TrimPrefix(str, v.iconPrefix)
+				str = v.iconPrefix + defaultStarStr + " " + namePart
 			}
 		}
 
@@ -182,6 +192,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	case worktreeGroupItem:
 		str = v.displayName
+
+	case workspaceToggleItem:
+		check := "\033[32m[x]\033[39m" // green checkbox
+		if v.excluded {
+			check = "\033[240m[ ]\033[39m" // dim unchecked
+		}
+		str = check + " " + v.workspaceName + "/" + v.subProject
 
 	case separatorItem:
 		// Render a dim separator line — not selectable, cursor skips over it

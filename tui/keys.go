@@ -14,7 +14,8 @@ type KeyMap struct {
 	DetectProcesses  key.Binding
 	ExpandGroup      key.Binding
 	SetDefault       key.Binding
-	RepoFocus        key.Binding
+	RepoFocus         key.Binding
+	WorkspaceManager  key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -65,5 +66,9 @@ var DefaultKeyMap = KeyMap{
 	RepoFocus: key.NewBinding(
 		key.WithKeys("ctrl+t"),
 		key.WithHelp("ctrl+t", "focus repo worktrees"),
+	),
+	WorkspaceManager: key.NewBinding(
+		key.WithKeys("ctrl+w"),
+		key.WithHelp("ctrl+w", "workspace manager"),
 	),
 }

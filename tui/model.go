@@ -21,7 +21,7 @@ import (
 // tmux sessions winning remaining ties.
 // Worktree siblings (same repo prefix) are grouped together, ordered by
 // the best score in the group.
-func seshFilter(items []list.Item, frecencyScores map[string]float64) list.FilterFunc {
+func seshFilter(items []list.Item, frecencyScores map[string]float64, workspacePrefixes []string) list.FilterFunc {
 	return func(term string, targets []string) []list.Rank {
 		if term == "" {
 			return nil
@@ -57,7 +57,7 @@ func seshFilter(items []list.Item, frecencyScores map[string]float64) list.Filte
 			// Determine repo group: items with "/" get grouped by prefix
 			repo := ""
 			if strings.Contains(name, "/") {
-				repo = strings.SplitN(name, "/", 2)[0]
+				repo = groupKeyForItem(name, src, workspacePrefixes)
 			}
 
 			// Look up frecency score for tiebreaking
@@ -170,8 +170,15 @@ type Model struct {
 	expandedGroup    *string                  // shared with delegate (heap-allocated)
 	worktreeDefaults *map[string]string       // shared with delegate (heap-allocated)
 	defaultsPath     string                   // path to defaults JSON file
-	repoFocusFilter  string                   // repo name for Ctrl+T focus ("" = no focus)
-	frecencyScores   map[string]float64       // frecency scores for filter tiebreaking
+	repoFocusFilter   string                   // repo name for Ctrl+T focus ("" = no focus)
+	frecencyScores    map[string]float64       // frecency scores for filter tiebreaking
+	workspacePrefixes []string                 // workspace config names for group key extraction
+
+	// Workspace manager mode
+	workspaceManagerMode bool                     // true when in workspace manager mode
+	workspaceExcludes    map[string][]string       // workspace name -> excluded sub-project paths
+	workspaceSubProjects map[string][]string       // cached discovered sub-projects (during manager mode)
+	excludesPath         string                    // path to workspace-excludes.json
 }
 
 func newModel(
@@ -185,6 +192,7 @@ func newModel(
 	worktreeDefaults map[string]string,
 	defaultsPath string,
 	frecencyScores map[string]float64,
+	excludesPath string,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -204,14 +212,22 @@ func newModel(
 	}
 	logDebug("newModel: %d items built", len(items))
 
+	// Extract workspace prefixes from config for group key extraction
+	workspacePrefixes := make([]string, 0, len(config.WorkspaceConfigs))
+	for _, ws := range config.WorkspaceConfigs {
+		if ws.Name != "" {
+			workspacePrefixes = append(workspacePrefixes, ws.Name)
+		}
+	}
+
 	// Partition items so tmux sessions appear first
 	items = partitionItemsByTmux(items)
 	logDebug("newModel: partitioned by tmux")
 
 	// Build worktree groups and create collapsed display items
-	worktreeGroups := buildWorktreeGroups(items, worktreeDefaults)
+	worktreeGroups := buildWorktreeGroups(items, worktreeDefaults, workspacePrefixes)
 	logDebug("newModel: %d worktree groups built", len(worktreeGroups))
-	displayItems := buildDisplayItems(items, worktreeGroups, "")
+	displayItems := buildDisplayItems(items, worktreeGroups, "", workspacePrefixes)
 	logDebug("newModel: %d display items built", len(displayItems))
 
 	// Create model instance first (we need to pass processInfo pointer to delegate)
@@ -230,9 +246,11 @@ func newModel(
 		worktreeGroups:   worktreeGroups,
 		expandedGroup:    new(string),
 		worktreeDefaults: &worktreeDefaults,
-		defaultsPath:     defaultsPath,
-		repoFocusFilter:  "",
-		frecencyScores:   frecencyScores,
+		defaultsPath:      defaultsPath,
+		repoFocusFilter:   "",
+		frecencyScores:    frecencyScores,
+		workspacePrefixes: workspacePrefixes,
+		excludesPath:      excludesPath,
 	}
 
 	logDebug("newModel: creating list widget")
@@ -251,7 +269,7 @@ func newModel(
 	l.SetShowHelp(false)  // Hide help to keep UI clean
 
 	// Use custom filter with fzf-style scoring, frecency tiebreaking
-	l.Filter = seshFilter(displayItems, frecencyScores)
+	l.Filter = seshFilter(displayItems, frecencyScores, workspacePrefixes)
 
 	// Create preview viewport
 	vp := viewport.New(previewWidth, 24)

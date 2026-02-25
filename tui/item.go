@@ -49,6 +49,30 @@ func (g worktreeGroupItem) Description() string { return "" }
 // FilterValue returns the repo name used for fuzzy filtering
 func (g worktreeGroupItem) FilterValue() string { return g.repoName }
 
+// workspaceToggleItem represents a sub-project toggle in workspace manager mode
+type workspaceToggleItem struct {
+	workspaceName string // e.g., "mono"
+	subProject    string // e.g., "packages/auth"
+	excluded      bool   // true = excluded from session list
+}
+
+// Title returns the display name with checkbox
+func (w workspaceToggleItem) Title() string {
+	check := "[x]"
+	if w.excluded {
+		check = "[ ]"
+	}
+	return check + " " + w.workspaceName + "/" + w.subProject
+}
+
+// Description returns empty string
+func (w workspaceToggleItem) Description() string { return "" }
+
+// FilterValue returns the full path for fuzzy filtering
+func (w workspaceToggleItem) FilterValue() string {
+	return w.workspaceName + "/" + w.subProject
+}
+
 // separatorItem is a non-selectable visual divider between active and inactive sessions.
 type separatorItem struct{}
 

@@ -17,6 +17,7 @@ type (
 		Zoxide         bool
 		Tmuxinator     bool
 		Projects       bool
+		Workspace      bool
 		HideDuplicates bool
 	}
 	srcStrategy func(*RealLister) (model.SeshSessions, error)
@@ -34,6 +35,7 @@ var srcStrategies = map[string]srcStrategy{
 	"tmuxinator": listTmuxinator,
 	"zoxide":     listZoxide,
 	"projects":   listProjects,
+	"workspace":  listWorkspace,
 }
 
 func (l *RealLister) List(opts ListOptions) (model.SeshSessions, error) {

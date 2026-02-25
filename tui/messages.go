@@ -31,3 +31,7 @@ type ProcessInfoMsg struct {
 type DefaultsSavedMsg struct {
 	Err error // nil on success
 }
+
+type ExcludesSavedMsg struct {
+	Err error // nil on success
+}

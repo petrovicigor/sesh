@@ -66,7 +66,10 @@ func (t *TUI) Run() (string, error) {
 	frecencyScores := t.recent.GetFrecencyScores()
 	logDebug("GetFrecencyScores() done (%d entries)", len(frecencyScores))
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores)
+	// Compute excludes path for workspace manager
+	excludesPath := state.ExcludesPath(os.Getenv("XDG_STATE_HOME"))
+
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath)
 	logDebug("newModel() done")
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
