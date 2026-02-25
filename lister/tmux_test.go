@@ -79,7 +79,7 @@ func TestListTmuxSessions(t *testing.T) {
 		mockZoxide := new(zoxide.MockZoxide)
 		mockTmuxinator := new(tmuxinator.MockTmuxinator)
 		mockGit := new(git.MockGit)
-		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
+		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil, "")
 
 		realLister, ok := lister.(*RealLister)
 		if !ok {
@@ -104,7 +104,7 @@ func TestListTmuxSessionsError(t *testing.T) {
 		mockZoxide := new(zoxide.MockZoxide)
 		mockTmuxinator := new(tmuxinator.MockTmuxinator)
 		mockGit := new(git.MockGit)
-		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
+		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil, "")
 
 		realLister, ok := lister.(*RealLister)
 		if !ok {

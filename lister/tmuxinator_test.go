@@ -26,7 +26,7 @@ func TestListTmuxinatorConfigs(t *testing.T) {
 		}, nil)
 		mockGit := new(git.MockGit)
 
-		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil)
+		lister := NewLister(mockConfig, mockHome, mockTmux, mockZoxide, mockTmuxinator, mockGit, nil, "")
 
 		realLister, ok := lister.(*RealLister)
 		if !ok {

@@ -28,6 +28,7 @@ var (
 	worktreeIcon   string = "⎇"
 	configIcon     string = ""
 	tmuxinatorIcon string = ""
+	workspaceIcon  string = "📦"
 )
 
 func ansiString(code int, s string) string {
@@ -56,9 +57,9 @@ func (i *RealIcon) AddIcon(s model.SeshSession) string {
 	// 1. Name has "/" format (repo/branch)
 	// 2. Path is actually a git worktree (.git is a file, not directory)
 	// This distinguishes real worktrees from disambiguated names like "igorpetrovic/test-zoxide"
-	isWorktree := (s.Src == "tmux" || s.Src == "projects") &&
+	isWorktree := (s.Src == "tmux" || s.Src == "projects" || s.Src == "workspace") &&
 		strings.Contains(s.Name, "/") &&
-		isGitWorktree(s.Path)
+		(s.Src == "workspace" || isGitWorktree(s.Path))
 
 	if isWorktree {
 		// For worktrees, insert worktree separator between repo and branch
@@ -70,10 +71,25 @@ func (i *RealIcon) AddIcon(s model.SeshSession) string {
 		case "projects":
 			icon = zoxideIcon // folder icon
 			colorCode = 32    // green
+		case "workspace":
+			icon = workspaceIcon
+			colorCode = 35 // magenta
 		}
-		parts := strings.SplitN(s.Name, "/", 2)
-		if len(parts) == 2 {
-			return fmt.Sprintf("%s %s %s %s", ansiString(colorCode, icon), parts[0], worktreeIcon, parts[1])
+		if s.Src == "workspace" {
+			// Workspace names: "mono/packages/box-api/develop" → split at LAST slash
+			// to get "mono/packages/box-api ⎇ develop"
+			lastSlash := strings.LastIndex(s.Name, "/")
+			if lastSlash > 0 {
+				subProject := s.Name[:lastSlash]
+				branch := s.Name[lastSlash+1:]
+				return fmt.Sprintf("%s %s %s %s", ansiString(colorCode, icon), subProject, worktreeIcon, branch)
+			}
+		} else {
+			// Regular projects/tmux: "geoip/develop" → split at first slash
+			parts := strings.SplitN(s.Name, "/", 2)
+			if len(parts) == 2 {
+				return fmt.Sprintf("%s %s %s %s", ansiString(colorCode, icon), parts[0], worktreeIcon, parts[1])
+			}
 		}
 	}
 
@@ -93,6 +109,9 @@ func (i *RealIcon) AddIcon(s model.SeshSession) string {
 	case "config":
 		icon = zoxideIcon
 		colorCode = 90 // gray
+	case "workspace":
+		icon = workspaceIcon
+		colorCode = 35 // magenta
 	}
 
 	if icon != "" {
@@ -120,6 +139,10 @@ func (i *RealIcon) RemoveIcon(name string) string {
 	// Regular icon stripping
 	if strings.HasPrefix(name, tmuxIcon) || strings.HasPrefix(name, zoxideIcon) || strings.HasPrefix(name, configIcon) || strings.HasPrefix(name, tmuxinatorIcon) {
 		return name[4:]
+	}
+	// workspaceIcon (📦) is 4 bytes UTF-8 + 1 space = 5 bytes
+	if strings.HasPrefix(name, workspaceIcon) {
+		return name[len(workspaceIcon)+1:]
 	}
 	return name
 }

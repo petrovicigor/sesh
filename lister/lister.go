@@ -21,24 +21,27 @@ type Lister interface {
 	FindZoxideSession(name string) (model.SeshSession, bool)
 	FindTmuxinatorConfig(name string) (model.SeshSession, bool)
 	FindProjectSession(name string) (model.SeshSession, bool)
+	FindWorkspaceSession(name string) (model.SeshSession, bool)
+	ListWorkspaceSubProjects() map[string][]string
 	InvalidateTmuxCache()
 }
 
 type RealLister struct {
-	config     model.Config
-	home       home.Home
-	tmux       tmux.Tmux
-	zoxide     zoxide.Zoxide
-	tmuxinator tmuxinator.Tmuxinator
-	git        git.Git
-	recent     recent.Recent
+	config       model.Config
+	home         home.Home
+	tmux         tmux.Tmux
+	zoxide       zoxide.Zoxide
+	tmuxinator   tmuxinator.Tmuxinator
+	git          git.Git
+	recent       recent.Recent
+	excludesPath string
 
 	// Tmux session cache (per-request)
 	tmuxCache       model.SeshSessions
 	tmuxCacheLoaded bool
 }
 
-func NewLister(config model.Config, home home.Home, tmux tmux.Tmux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator, git git.Git, recent recent.Recent) Lister {
+func NewLister(config model.Config, home home.Home, tmux tmux.Tmux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator, git git.Git, recent recent.Recent, excludesPath string) Lister {
 	return &RealLister{
 		config:          config,
 		home:            home,
@@ -47,6 +50,7 @@ func NewLister(config model.Config, home home.Home, tmux tmux.Tmux, zoxide zoxid
 		tmuxinator:      tmuxinator,
 		git:             git,
 		recent:          recent,
+		excludesPath:    excludesPath,
 		tmuxCache:       model.SeshSessions{},
 		tmuxCacheLoaded: false,
 	}

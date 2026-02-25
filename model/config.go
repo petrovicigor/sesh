@@ -12,6 +12,7 @@ type (
 		DirLength            int                  `toml:"dir_length"`
 		ProjectsConfig       ProjectsConfig       `toml:"projects"`
 		ZoxideConfig         ZoxideConfig         `toml:"zoxide"`
+		WorkspaceConfigs     []WorkspaceConfig    `toml:"workspace"`
 	}
 	Evaluation struct {
 		StrictMode bool `toml:"strict_mode"`
@@ -56,5 +57,13 @@ type (
 
 	ZoxideConfig struct {
 		Exclude []string `toml:"exclude"`
+	}
+
+	WorkspaceConfig struct {
+		Name            string   `toml:"name"`
+		Path            string   `toml:"path"`
+		Include         []string `toml:"include"`
+		Exclude         []string `toml:"exclude"`
+		DefaultWorktree string   `toml:"default_worktree"`
 	}
 )

@@ -45,11 +45,14 @@ func srcs(opts ListOptions) []string {
 	if opts.Projects {
 		count++
 	}
+	if opts.Workspace {
+		count++
+	}
 	if opts.Zoxide {
 		count++
 	}
 	if count == 0 {
-		return []string{"tmux", "config", "projects", "tmuxinator"}
+		return []string{"tmux", "config", "projects", "workspace", "tmuxinator"}
 	}
 	srcs = make([]string, count)
 	i := 0
@@ -67,6 +70,10 @@ func srcs(opts ListOptions) []string {
 	}
 	if opts.Projects {
 		srcs[i] = "projects"
+		i++
+	}
+	if opts.Workspace {
+		srcs[i] = "workspace"
 		i++
 	}
 	if opts.Zoxide {
