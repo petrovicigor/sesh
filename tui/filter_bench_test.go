@@ -32,8 +32,8 @@ func BenchmarkDefaultFilter(b *testing.B) {
 	}
 }
 
-// BenchmarkTmuxFirstFilter benchmarks our custom filter
-func BenchmarkTmuxFirstFilter(b *testing.B) {
+// BenchmarkSeshFilter benchmarks our custom filter
+func BenchmarkSeshFilter(b *testing.B) {
 	items := make([]list.Item, 100)
 	targets := make([]string, 100)
 
@@ -51,15 +51,15 @@ func BenchmarkTmuxFirstFilter(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := tmuxFirstFilter(items)
+	filter := seshFilter(items, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = filter("ses", targets)
 	}
 }
 
-// BenchmarkTmuxFirstFilterSmall benchmarks with realistic session count (20)
-func BenchmarkTmuxFirstFilterSmall(b *testing.B) {
+// BenchmarkSeshFilterSmall benchmarks with realistic session count (20)
+func BenchmarkSeshFilterSmall(b *testing.B) {
 	items := make([]list.Item, 20)
 	targets := make([]string, 20)
 
@@ -77,7 +77,7 @@ func BenchmarkTmuxFirstFilterSmall(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := tmuxFirstFilter(items)
+	filter := seshFilter(items, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = filter("ses", targets)
@@ -116,7 +116,7 @@ func BenchmarkFilterNoMatches(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := tmuxFirstFilter(items)
+	filter := seshFilter(items, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Search for something that doesn't exist
@@ -142,10 +142,35 @@ func BenchmarkFilterAllMatches(b *testing.B) {
 		targets[i] = name
 	}
 
-	filter := tmuxFirstFilter(items)
+	filter := seshFilter(items, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Search for something that matches everything
 		_ = filter("ses", targets)
+	}
+}
+
+// BenchmarkFuzzyScore benchmarks the custom fuzzy scorer with realistic targets
+func BenchmarkFuzzyScore(b *testing.B) {
+	targets := []string{
+		"chase-search/develop",
+		"geoip/feature-x",
+		"dotfiles",
+		"sesh",
+		"chase-cognito",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, t := range targets {
+			fuzzyScore("dev", t)
+		}
+	}
+}
+
+// BenchmarkFuzzyScoreNoMatch benchmarks the scorer when nothing matches
+func BenchmarkFuzzyScoreNoMatch(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fuzzyScore("xyz123", "chase-search/develop")
 	}
 }

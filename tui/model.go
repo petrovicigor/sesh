@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -15,74 +16,131 @@ import (
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
-// tmuxFirstFilter returns a custom FilterFunc that groups results by repo.
-// Within each group, tmux sessions appear before other sources.
-// Groups are ordered by the best fuzzy match score of any item in the group.
-func tmuxFirstFilter(items []list.Item) list.FilterFunc {
+// seshFilter returns a custom FilterFunc with fzf-style fuzzy scoring.
+// Ranks results by match quality, with frecency tiebreaking within 5% score bands,
+// tmux sessions winning remaining ties.
+// Worktree siblings (same repo prefix) are grouped together, ordered by
+// the best score in the group.
+func seshFilter(items []list.Item, frecencyScores map[string]float64) list.FilterFunc {
 	return func(term string, targets []string) []list.Rank {
-		ranks := list.DefaultFilter(term, targets)
-
-		if len(ranks) == 0 {
-			return ranks
+		if term == "" {
+			return nil
 		}
 
-		// Group ranks by repo name
-		type repoGroup struct {
-			repo       string
-			tmuxRanks  []list.Rank
-			otherRanks []list.Rank
+		type scoredRank struct {
+			rank     list.Rank
+			score    float64
+			src      string
+			repo     string  // repo prefix for grouping ("" = ungrouped)
+			frecency float64 // frecency score for tiebreaking
 		}
 
-		groupMap := make(map[string]*repoGroup)
-		groupOrder := make([]string, 0) // preserve first-seen order by score
-
-		for _, rank := range ranks {
-			if rank.Index >= len(items) {
+		results := make([]scoredRank, 0, len(targets))
+		for i, target := range targets {
+			score, indices := fuzzyScore(term, target)
+			if score <= 0 {
 				continue
 			}
 
-			// Determine item name and source
-			var name, src string
-			switch v := items[rank.Index].(type) {
-			case sessionItem:
-				name = v.session.Name
-				src = v.session.Src
-			case worktreeGroupItem:
-				name = v.repoName
-				src = "projects"
-			default:
+			var src, name string
+			if i < len(items) {
+				switch v := items[i].(type) {
+				case sessionItem:
+					src = v.session.Src
+					name = v.session.Name
+				case worktreeGroupItem:
+					src = "projects"
+					name = v.repoName
+				}
+			}
+
+			// Determine repo group: items with "/" get grouped by prefix
+			repo := ""
+			if strings.Contains(name, "/") {
+				repo = strings.SplitN(name, "/", 2)[0]
+			}
+
+			// Look up frecency score for tiebreaking
+			var frec float64
+			if frecencyScores != nil {
+				frec = frecencyScores[name]
+			}
+
+			results = append(results, scoredRank{
+				rank: list.Rank{
+					Index:          i,
+					MatchedIndexes: indices,
+				},
+				score:    score,
+				src:      src,
+				repo:     repo,
+				frecency: frec,
+			})
+		}
+
+		// Sort by score, with frecency tiebreaking within 5% bands
+		slices.SortStableFunc(results, func(a, b scoredRank) int {
+			// If scores differ by more than 5%, sort by score alone
+			maxScore := a.score
+			if b.score > maxScore {
+				maxScore = b.score
+			}
+			diff := a.score - b.score
+			if diff < 0 {
+				diff = -diff
+			}
+			if maxScore > 0 && diff/maxScore > 0.05 {
+				if a.score > b.score {
+					return -1
+				}
+				return 1
+			}
+			// Within 5% band: frecency tiebreaker
+			if a.frecency != b.frecency {
+				if a.frecency > b.frecency {
+					return -1
+				}
+				return 1
+			}
+			// Tmux wins remaining ties
+			aIsTmux := a.src == "tmux"
+			bIsTmux := b.src == "tmux"
+			if aIsTmux && !bIsTmux {
+				return -1
+			}
+			if !aIsTmux && bIsTmux {
+				return 1
+			}
+			return 0
+		})
+
+		// Group worktree siblings together: when we encounter the first item
+		// from a repo, pull all other items from that repo to follow it.
+		grouped := make([]scoredRank, 0, len(results))
+		used := make(map[int]bool)
+		for i, r := range results {
+			if used[i] {
 				continue
 			}
+			used[i] = true
+			grouped = append(grouped, r)
 
-			// Determine repo name
-			repo := name
-			if strings.Contains(repo, "/") {
-				repo = strings.SplitN(repo, "/", 2)[0]
-			}
-
-			g, exists := groupMap[repo]
-			if !exists {
-				g = &repoGroup{repo: repo}
-				groupMap[repo] = g
-				groupOrder = append(groupOrder, repo)
-			}
-
-			if src == "tmux" {
-				g.tmuxRanks = append(g.tmuxRanks, rank)
-			} else {
-				g.otherRanks = append(g.otherRanks, rank)
+			// If this item has a repo prefix, pull in all siblings
+			if r.repo != "" {
+				for j := i + 1; j < len(results); j++ {
+					if !used[j] && results[j].repo == r.repo {
+						used[j] = true
+						grouped = append(grouped, results[j])
+					}
+				}
 			}
 		}
 
-		// Build result: for each group (in score order), tmux first then others
-		result := make([]list.Rank, 0, len(ranks))
-		for _, repo := range groupOrder {
-			g := groupMap[repo]
-			result = append(result, g.tmuxRanks...)
-			result = append(result, g.otherRanks...)
+		ranks := make([]list.Rank, len(grouped))
+		for i, r := range grouped {
+			ranks[i] = r.rank
 		}
-
-		return result
+		return ranks
 	}
 }
 
@@ -113,6 +171,7 @@ type Model struct {
 	worktreeDefaults *map[string]string       // shared with delegate (heap-allocated)
 	defaultsPath     string                   // path to defaults JSON file
 	repoFocusFilter  string                   // repo name for Ctrl+T focus ("" = no focus)
+	frecencyScores   map[string]float64       // frecency scores for filter tiebreaking
 }
 
 func newModel(
@@ -125,6 +184,7 @@ func newModel(
 	sessions model.SeshSessions,
 	worktreeDefaults map[string]string,
 	defaultsPath string,
+	frecencyScores map[string]float64,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -172,6 +232,7 @@ func newModel(
 		worktreeDefaults: &worktreeDefaults,
 		defaultsPath:     defaultsPath,
 		repoFocusFilter:  "",
+		frecencyScores:   frecencyScores,
 	}
 
 	logDebug("newModel: creating list widget")
@@ -189,8 +250,8 @@ func newModel(
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)  // Hide help to keep UI clean
 
-	// Use custom filter that groups tmux sessions first
-	l.Filter = tmuxFirstFilter(displayItems)
+	// Use custom filter with fzf-style scoring, frecency tiebreaking
+	l.Filter = seshFilter(displayItems, frecencyScores)
 
 	// Create preview viewport
 	vp := viewport.New(previewWidth, 24)

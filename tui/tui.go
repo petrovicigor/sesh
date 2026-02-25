@@ -9,6 +9,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
+	"github.com/joshmedeski/sesh/v2/recent"
 	"github.com/joshmedeski/sesh/v2/state"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
@@ -20,6 +21,7 @@ type TUI struct {
 	tmux      tmux.Tmux
 	config    model.Config
 	previewer previewer.Previewer
+	recent    recent.Recent
 }
 
 func NewTUI(
@@ -29,6 +31,7 @@ func NewTUI(
 	tmux tmux.Tmux,
 	config model.Config,
 	previewer previewer.Previewer,
+	recent recent.Recent,
 ) *TUI {
 	return &TUI{
 		lister:    lister,
@@ -37,6 +40,7 @@ func NewTUI(
 		tmux:      tmux,
 		config:    config,
 		previewer: previewer,
+		recent:    recent,
 	}
 }
 
@@ -58,7 +62,11 @@ func (t *TUI) Run() (string, error) {
 	worktreeDefaults, _ := state.LoadDefaults(defaultsPath)
 	logDebug("state.LoadDefaults() done")
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath)
+	// Load frecency scores for filter tiebreaking
+	frecencyScores := t.recent.GetFrecencyScores()
+	logDebug("GetFrecencyScores() done (%d entries)", len(frecencyScores))
+
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores)
 	logDebug("newModel() done")
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
