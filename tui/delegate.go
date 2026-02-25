@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/truncate"
 )
 
 // Cached styles to avoid per-item allocations during rendering
@@ -17,8 +18,7 @@ var (
 	defaultStarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	treeConnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	nodeIndicatorStr   = nodeIndicatorStyle.Render(" ⬢")           // Pre-rendered
-	filterMatchStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")) // Bold orange/gold
-	filterMatchSelectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("228")) // Bold bright yellow (on selection bg)
+	filterDimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("242")) // Dim unmatched chars
 	badgeStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // Dim source badge
 	dimRepoStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))            // Dim repo prefix in filtered worktrees
 	defaultStarStr     = defaultStarStyle.Render("★")              // Pre-rendered gold star
@@ -68,11 +68,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	case sessionItem:
 		// During active filtering with matches, highlight matched chars in raw session name
 		if isFiltered && len(matchedRunes) > 0 {
-			matchStyle := filterMatchStyle
-			baseStyle := lipgloss.NewStyle()
+			// Dim non-matched characters, matched chars stay normal
+			textStyle := lipgloss.NewStyle()
+			dimStyle := filterDimStyle
 			if index == m.Index() {
-				matchStyle = filterMatchSelectedStyle
-				baseStyle = selectedItemStyle
+				textStyle = selectedItemStyle
 			}
 
 			// For worktree items (repo/branch), dim the repo prefix and highlight in the branch
@@ -92,25 +92,25 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 					}
 				}
 
-				// Render repo prefix dim (with highlights if chars matched there)
+				// Render repo prefix: matched chars normal, rest dim
 				var renderedRepo string
 				if len(repoIndices) > 0 {
-					renderedRepo = lipgloss.StyleRunes(repoPrefix, repoIndices, matchStyle, dimRepoStyle)
+					renderedRepo = lipgloss.StyleRunes(repoPrefix, repoIndices, textStyle, dimRepoStyle)
 				} else {
 					renderedRepo = dimRepoStyle.Render(repoPrefix)
 				}
 
-				// Render branch name with highlights
+				// Render branch name: matched chars normal, rest dim
 				var renderedBranch string
 				if len(branchIndices) > 0 {
-					renderedBranch = lipgloss.StyleRunes(branchName, branchIndices, matchStyle, baseStyle)
+					renderedBranch = lipgloss.StyleRunes(branchName, branchIndices, textStyle, dimStyle)
 				} else {
-					renderedBranch = baseStyle.Render(branchName)
+					renderedBranch = dimStyle.Render(branchName)
 				}
 
 				str = v.iconPrefix + renderedRepo + renderedBranch
 			} else {
-				highlighted := lipgloss.StyleRunes(v.session.Name, matchedRunes, matchStyle, baseStyle)
+				highlighted := lipgloss.StyleRunes(v.session.Name, matchedRunes, textStyle, dimStyle)
 				str = v.iconPrefix + highlighted
 			}
 		} else {
@@ -163,12 +163,17 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			str += v.groupBadge
 		}
 
-		// Show source badge during active filtering
+		// Show source badge during active filtering, truncating long names to fit
 		if isFiltered && len(matchedRunes) > 0 {
 			badge := badgeStyle.Render(v.session.Src)
-			nameWidth := lipgloss.Width(str)
 			badgeWidth := lipgloss.Width(badge)
 			prefixWidth := 2 // "❯ " or "  "
+			maxNameWidth := m.Width() - prefixWidth - badgeWidth - 1
+			nameWidth := lipgloss.Width(str)
+			if nameWidth > maxNameWidth && maxNameWidth > 3 {
+				str = truncate.StringWithTail(str, uint(maxNameWidth), "…")
+				nameWidth = lipgloss.Width(str)
+			}
 			gap := m.Width() - prefixWidth - nameWidth - badgeWidth
 			if gap > 0 {
 				str = str + strings.Repeat(" ", gap) + badge
