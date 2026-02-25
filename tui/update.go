@@ -47,7 +47,7 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
-	m.list.Filter = tmuxFirstFilter(displayItems)
+	m.list.Filter = seshFilter(displayItems, m.frecencyScores)
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -130,7 +130,7 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
-	m.list.Filter = tmuxFirstFilter(displayItems)
+	m.list.Filter = seshFilter(displayItems, m.frecencyScores)
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -219,7 +219,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetItems(displayItems)
 
 		// Update filter function with display items
-		m.list.Filter = tmuxFirstFilter(displayItems)
+		m.list.Filter = seshFilter(displayItems, m.frecencyScores)
 
 		// Update title based on current filter
 		m.list.Title = getFilterTitle(m.currentFilter)
@@ -524,7 +524,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Swap items in-place without leaving filter mode
 			m.lastFilter = ""
 			m.list.SetItems(displayItems)
-			m.list.Filter = tmuxFirstFilter(displayItems)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
 			m.list.SetSize(m.list.Width(), m.list.Height())
@@ -598,7 +598,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Swap items in-place without leaving filter mode — avoids layout shift
 			m.lastFilter = "" // Prevent filter transition from overwriting items
 			m.list.SetItems(displayItems)
-			m.list.Filter = tmuxFirstFilter(displayItems)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
 			// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -624,6 +624,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "up":
 				m.list.CursorUp()
+				// Skip separator items
+				if _, ok := m.list.SelectedItem().(separatorItem); ok {
+					m.list.CursorUp()
+				}
 				// Load preview for newly selected session, clear for group items
 				switch item := m.list.SelectedItem().(type) {
 				case sessionItem:
@@ -635,6 +639,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "down":
 				m.list.CursorDown()
+				// Skip separator items
+				if _, ok := m.list.SelectedItem().(separatorItem); ok {
+					m.list.CursorDown()
+				}
 				// Load preview for newly selected session, clear for group items
 				switch item := m.list.SelectedItem().(type) {
 				case sessionItem:
@@ -662,19 +670,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if prevFilter == "" && currentFilter != "" {
 				// Swap to full items for fuzzy search
 				*m.expandedGroup = ""
+				m.list.Filter = seshFilter(m.allItems, m.frecencyScores)
 				m.list.SetItems(m.allItems)
-				m.list.Filter = tmuxFirstFilter(m.allItems)
 				// Re-apply filter text after item swap
 				m.list.SetFilterText(currentFilter)
 				m.list.SetFilterState(list.Filtering)
 			}
 
 			// Transition: non-empty → empty (cleared filter)
+			// Must return early to avoid the stale async filter command from
+			// m.list.Update(msg) overriding our grouped displayItems.
 			if prevFilter != "" && currentFilter == "" {
-				// Swap back to collapsed display
 				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "")
 				m.list.SetItems(displayItems)
-				m.list.Filter = tmuxFirstFilter(displayItems)
+				m.list.Filter = seshFilter(displayItems, m.frecencyScores)
+				m.list.SetFilterText("")
+				m.list.SetFilterState(list.Filtering)
+				m.list.SetSize(m.list.Width(), m.list.Height())
+
+				m.list.Select(0)
+				switch item := m.list.SelectedItem().(type) {
+				case sessionItem:
+					return m.loadPreviewDebounced(item)
+				case worktreeGroupItem:
+					m.previewPort.SetContent("")
+					m.previewContent = ""
+				}
+				return m, nil
 			}
 
 			m.list.Select(0)

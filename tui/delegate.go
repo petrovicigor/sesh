@@ -17,11 +17,15 @@ var (
 	defaultStarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	treeConnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	nodeIndicatorStr   = nodeIndicatorStyle.Render(" ⬢")           // Pre-rendered
-	filterMatchStyle   = lipgloss.NewStyle().Underline(true)
+	filterMatchStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")) // Bold orange/gold
+	filterMatchSelectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("228")) // Bold bright yellow (on selection bg)
+	badgeStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // Dim source badge
+	dimRepoStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))            // Dim repo prefix in filtered worktrees
 	defaultStarStr     = defaultStarStyle.Render("★")              // Pre-rendered gold star
 	treeMidStr         = treeConnStyle.Render("│")                 // Pre-rendered connector
 	treeEndStr         = treeConnStyle.Render("└")                 // Pre-rendered last connector
 	bareRootStr        = treeConnStyle.Render("(bare root)")       // Pre-rendered bare repo label
+	separatorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 // extractIconPrefix derives the ANSI icon prefix from a pre-computed displayName.
@@ -57,15 +61,58 @@ func (d compactDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	var str string
 	var nodeIndicator string
+	isFiltered := m.FilterState() == list.Filtering && m.FilterValue() != ""
+	matchedRunes := m.MatchesForItem(index)
 
 	switch v := item.(type) {
 	case sessionItem:
 		// During active filtering with matches, highlight matched chars in raw session name
-		isFiltered := m.FilterState() == list.Filtering && m.FilterValue() != ""
-		matchedRunes := m.MatchesForItem(index)
 		if isFiltered && len(matchedRunes) > 0 {
-			highlighted := lipgloss.StyleRunes(v.session.Name, matchedRunes, filterMatchStyle, lipgloss.NewStyle())
-			str = v.iconPrefix + highlighted
+			matchStyle := filterMatchStyle
+			baseStyle := lipgloss.NewStyle()
+			if index == m.Index() {
+				matchStyle = filterMatchSelectedStyle
+				baseStyle = selectedItemStyle
+			}
+
+			// For worktree items (repo/branch), dim the repo prefix and highlight in the branch
+			if strings.Contains(v.session.Name, "/") {
+				parts := strings.SplitN(v.session.Name, "/", 2)
+				repoPrefix := parts[0] + "/"
+				branchName := parts[1]
+				repoPrefixLen := len(repoPrefix)
+
+				// Split matched indices into repo part and branch part
+				var repoIndices, branchIndices []int
+				for _, idx := range matchedRunes {
+					if idx < repoPrefixLen {
+						repoIndices = append(repoIndices, idx)
+					} else {
+						branchIndices = append(branchIndices, idx-repoPrefixLen)
+					}
+				}
+
+				// Render repo prefix dim (with highlights if chars matched there)
+				var renderedRepo string
+				if len(repoIndices) > 0 {
+					renderedRepo = lipgloss.StyleRunes(repoPrefix, repoIndices, matchStyle, dimRepoStyle)
+				} else {
+					renderedRepo = dimRepoStyle.Render(repoPrefix)
+				}
+
+				// Render branch name with highlights
+				var renderedBranch string
+				if len(branchIndices) > 0 {
+					renderedBranch = lipgloss.StyleRunes(branchName, branchIndices, matchStyle, baseStyle)
+				} else {
+					renderedBranch = baseStyle.Render(branchName)
+				}
+
+				str = v.iconPrefix + renderedRepo + renderedBranch
+			} else {
+				highlighted := lipgloss.StyleRunes(v.session.Name, matchedRunes, matchStyle, baseStyle)
+				str = v.iconPrefix + highlighted
+			}
 		} else {
 			str = v.displayName
 		}
@@ -116,8 +163,30 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			str += v.groupBadge
 		}
 
+		// Show source badge during active filtering
+		if isFiltered && len(matchedRunes) > 0 {
+			badge := badgeStyle.Render(v.session.Src)
+			nameWidth := lipgloss.Width(str)
+			badgeWidth := lipgloss.Width(badge)
+			prefixWidth := 2 // "❯ " or "  "
+			gap := m.Width() - prefixWidth - nameWidth - badgeWidth
+			if gap > 0 {
+				str = str + strings.Repeat(" ", gap) + badge
+			}
+		}
+
 	case worktreeGroupItem:
 		str = v.displayName
+
+	case separatorItem:
+		// Render a dim separator line — not selectable, cursor skips over it
+		label := " ─── available "
+		remaining := m.Width() - lipgloss.Width(label)
+		if remaining > 0 {
+			label += strings.Repeat("─", remaining)
+		}
+		fmt.Fprint(w, separatorStyle.Render(label))
+		return
 
 	default:
 		return
@@ -135,7 +204,12 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	// Highlight selected item
 	if index == m.Index() {
-		str = selectedItemStyle.Render("❯ " + treePrefix + str + nodeIndicator)
+		if isFiltered && len(matchedRunes) > 0 {
+			// Already styled per-character above, just add cursor prefix
+			str = selectedItemStyle.Render("❯ ") + treePrefix + str + nodeIndicator
+		} else {
+			str = selectedItemStyle.Render("❯ " + treePrefix + str + nodeIndicator)
+		}
 	} else {
 		str = "  " + treePrefix + str + nodeIndicator
 	}

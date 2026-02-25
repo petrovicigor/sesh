@@ -48,3 +48,10 @@ func (g worktreeGroupItem) Description() string { return "" }
 
 // FilterValue returns the repo name used for fuzzy filtering
 func (g worktreeGroupItem) FilterValue() string { return g.repoName }
+
+// separatorItem is a non-selectable visual divider between active and inactive sessions.
+type separatorItem struct{}
+
+func (s separatorItem) Title() string       { return "" }
+func (s separatorItem) Description() string { return "" }
+func (s separatorItem) FilterValue() string { return "" }

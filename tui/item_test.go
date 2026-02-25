@@ -33,6 +33,28 @@ func TestWorktreeGroupItemInterface(t *testing.T) {
 	})
 }
 
+func TestSeparatorItem(t *testing.T) {
+	sep := separatorItem{}
+
+	t.Run("FilterValue returns empty string", func(t *testing.T) {
+		if sep.FilterValue() != "" {
+			t.Errorf("expected empty FilterValue, got %q", sep.FilterValue())
+		}
+	})
+
+	t.Run("Title returns empty string", func(t *testing.T) {
+		if sep.Title() != "" {
+			t.Errorf("expected empty Title, got %q", sep.Title())
+		}
+	})
+
+	t.Run("Description returns empty string", func(t *testing.T) {
+		if sep.Description() != "" {
+			t.Errorf("expected empty Description, got %q", sep.Description())
+		}
+	})
+}
+
 func TestSessionItemInterface(t *testing.T) {
 	item := sessionItem{
 		session:     model.SeshSession{Name: "test", Src: "tmux"},
