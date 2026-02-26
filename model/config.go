@@ -60,10 +60,12 @@ type (
 	}
 
 	WorkspaceConfig struct {
-		Name            string   `toml:"name"`
-		Path            string   `toml:"path"`
-		Include         []string `toml:"include"`
-		Exclude         []string `toml:"exclude"`
-		DefaultWorktree string   `toml:"default_worktree"`
+		Name              string   `toml:"name"`
+		Path              string   `toml:"path"`
+		Include           []string `toml:"include"`
+		Exclude           []string `toml:"exclude"`
+		DefaultWorktree   string   `toml:"default_worktree"`
+		StartupCommand    string   `toml:"startup_command"`
+		GitStartupCommand string   `toml:"git_startup_command"`
 	}
 )

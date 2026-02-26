@@ -32,6 +32,7 @@ func (s *RealStartup) Exec(session model.SeshSession) (string, error) {
 	strategies := []func(*RealStartup, model.SeshSession) (string, error){
 		configStrategy,
 		projectsStrategy,
+		workspaceStrategy,
 		defaultConfigStrategy,
 	}
 
