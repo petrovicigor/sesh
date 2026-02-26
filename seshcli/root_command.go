@@ -112,7 +112,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewLastCommand(lister, tmux, recentTracker, connector),
 		NewConnectCommand(connector, icon, dir),
 		NewCloneCommand(cloner),
-		NewRootSessionCommand(lister, namer),
+		NewRootSessionCommand(lister, connector, config, home),
 		NewPreviewCommand(previewer),
 		NewPathCommand(icon, lister),
 		NewFindByPathCommand(lister),
