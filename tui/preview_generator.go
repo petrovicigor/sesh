@@ -122,6 +122,167 @@ func GenerateRichPreview(sessionName string, path string, isActive bool, isGit b
 	return output.String()
 }
 
+// isInsideGitWorkTree checks if a path is inside a git work tree (but not necessarily at the root).
+// Used to detect workspace sub-projects that live inside a monorepo.
+func isInsideGitWorkTree(path string) bool {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--is-inside-work-tree")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(output)) == "true"
+}
+
+// getGitRelativePrefix returns the path relative to the git root (e.g., "packages/ui").
+func getGitRelativePrefix(path string) string {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--show-prefix")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(string(output)), "/")
+}
+
+// getGitStatusFiltered returns git status filtered to the current directory and the count
+// of other changes outside this directory. Both commands run in parallel.
+func getGitStatusFiltered(path string, isActive bool) (filtered string, otherCount int) {
+	var wg sync.WaitGroup
+	var filteredOut, totalOut []byte
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("git", "-C", path, "-c", "color.status=always", "status", "--short", "--", ".")
+		filteredOut, _ = cmd.Output()
+	}()
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("git", "-C", path, "status", "--short")
+		totalOut, _ = cmd.Output()
+	}()
+	wg.Wait()
+
+	filteredStr := string(filteredOut)
+	if !isActive {
+		filteredStr = dimANSI(filteredStr)
+	}
+	filtered = strings.TrimSpace(filteredStr)
+
+	// Count lines to determine other changes
+	filteredLines := countNonEmptyLines(string(filteredOut))
+	totalLines := countNonEmptyLines(string(totalOut))
+	otherCount = totalLines - filteredLines
+	return
+}
+
+// getGitLogFiltered returns git log filtered to changes in the current directory.
+func getGitLogFiltered(path string, isActive bool) string {
+	cmd := exec.Command("git", "-C", path, "log", "--oneline", "--graph", "--decorate", "--color=always", "-3", "--", ".")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	log := string(output)
+	if !isActive {
+		log = dimANSI(log)
+	}
+	return log
+}
+
+// countNonEmptyLines counts lines that are not empty.
+func countNonEmptyLines(s string) int {
+	count := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// GenerateWorkspacePreview creates a rich preview for workspace sub-projects (monorepo packages/apps).
+// Similar to GenerateRichPreview but filters git status and log to the sub-project directory,
+// and shows a count of other changes outside the sub-project.
+func GenerateWorkspacePreview(sessionName string, path string, isActive bool) string {
+	logDebug("GenerateWorkspacePreview: start for %q (active=%v)", sessionName, isActive)
+	var output strings.Builder
+
+	cyan := colorCyan
+	green := colorGreen
+	if !isActive {
+		cyan = colorCyanDim
+		green = colorGreenDim
+	}
+
+	var wg sync.WaitGroup
+	var branch, tracking, filteredStatus, commits, claudeSessions, relPrefix string
+	var otherCount int
+
+	wg.Add(6)
+
+	go func() {
+		defer wg.Done()
+		branch = getGitBranch(path)
+	}()
+
+	go func() {
+		defer wg.Done()
+		tracking = getGitTracking(path)
+	}()
+
+	go func() {
+		defer wg.Done()
+		filteredStatus, otherCount = getGitStatusFiltered(path, isActive)
+	}()
+
+	go func() {
+		defer wg.Done()
+		commits = getGitLogFiltered(path, isActive)
+	}()
+
+	go func() {
+		defer wg.Done()
+		claudeSessions = getClaudeSessions(path, sessionName, isActive)
+	}()
+
+	go func() {
+		defer wg.Done()
+		relPrefix = getGitRelativePrefix(path)
+	}()
+
+	wg.Wait()
+	logDebug("GenerateWorkspacePreview: all parallel commands done")
+
+	// Build output
+	output.WriteString(fmt.Sprintf("%s󰘬 %s%s%s%s\n\n", cyan, branch, green, tracking, colorReset))
+
+	if claudeSessions != "" {
+		output.WriteString(claudeSessions)
+		output.WriteString("\n")
+	}
+
+	output.WriteString(fmt.Sprintf("%s━━━ Status ━━━%s\n", colorDim, colorReset))
+	if filteredStatus == "" {
+		output.WriteString(fmt.Sprintf("%sclean%s\n", colorDim, colorReset))
+	} else {
+		output.WriteString(filteredStatus + "\n")
+	}
+	if otherCount > 0 {
+		label := relPrefix
+		if label == "" {
+			label = "this directory"
+		}
+		output.WriteString(fmt.Sprintf("  %s%d other files changed outside %s%s\n", colorDim, otherCount, label, colorReset))
+	}
+	output.WriteString("\n")
+
+	output.WriteString(fmt.Sprintf("%s━━━ Recent Commits ━━━%s\n", colorDim, colorReset))
+	output.WriteString(commits)
+
+	return output.String()
+}
+
 func isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
 	info, err := os.Stat(gitDir)

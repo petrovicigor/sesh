@@ -77,6 +77,16 @@ func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
 		// Check git status once (avoid double stat)
 		isGit := path != "" && isGitRepo(path)
 
+		// For workspace sub-projects (path inside a git repo but not at root),
+		// show filtered git preview regardless of active/inactive state.
+		isSubdirGit := !isGit && path != "" && isInsideGitWorkTree(path)
+		logDebug("loadPreview: isGit=%v, isSubdirGit=%v, path=%q", isGit, isSubdirGit, path)
+		if isSubdirGit {
+			logDebug("loadPreview: workspace sub-project detected, generating filtered preview")
+			content := GenerateWorkspacePreview(session.Name, path, isActive)
+			return PreviewLoadedMsg{Content: content}
+		}
+
 		// For active tmux sessions in git repos, show git info
 		if isActive && isGit {
 			logDebug("loadPreview: active tmux git repo path")

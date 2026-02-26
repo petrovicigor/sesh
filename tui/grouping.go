@@ -166,6 +166,23 @@ func dormantWorktrees(uniqueItems []sessionItem, tmuxNames map[string]bool) []se
 	return result
 }
 
+// representativeSession returns the best session to use for previewing a collapsed group.
+// Prefers the default branch worktree; falls back to the first worktree.
+func representativeSession(group worktreeGroupItem) (sessionItem, bool) {
+	if len(group.worktrees) == 0 {
+		return sessionItem{}, false
+	}
+	if group.defaultBranch != "" {
+		target := group.repoName + "/" + group.defaultBranch
+		for _, wt := range group.worktrees {
+			if wt.session.Name == target {
+				return wt, true
+			}
+		}
+	}
+	return group.worktrees[0], true
+}
+
 // formatGroupDisplay creates the display string for a collapsed worktree group (no active sessions).
 // Uses folder icon (green) for projects, 📦 icon (magenta) for workspace groups.
 func formatGroupDisplay(repoName string, defaultBranch string, extraCount int, isWorkspace bool) string {

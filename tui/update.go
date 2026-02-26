@@ -803,13 +803,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if _, ok := m.list.SelectedItem().(separatorItem); ok {
 					m.list.CursorUp()
 				}
-				// Load preview for newly selected session, clear for group items
+				// Load preview for newly selected session or group representative
 				switch item := m.list.SelectedItem().(type) {
 				case sessionItem:
 					return m.loadPreviewDebounced(item)
 				case worktreeGroupItem:
-					m.previewPort.SetContent("")
-					m.previewContent = ""
+					if rep, ok := representativeSession(item); ok {
+						return m.loadPreviewDebounced(rep)
+					}
 				}
 				return m, nil
 			case "down":
@@ -818,13 +819,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if _, ok := m.list.SelectedItem().(separatorItem); ok {
 					m.list.CursorDown()
 				}
-				// Load preview for newly selected session, clear for group items
+				// Load preview for newly selected session or group representative
 				switch item := m.list.SelectedItem().(type) {
 				case sessionItem:
 					return m.loadPreviewDebounced(item)
 				case worktreeGroupItem:
-					m.previewPort.SetContent("")
-					m.previewContent = ""
+					if rep, ok := representativeSession(item); ok {
+						return m.loadPreviewDebounced(rep)
+					}
 				}
 				return m, nil
 			}
@@ -868,22 +870,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case sessionItem:
 					return m.loadPreviewDebounced(item)
 				case worktreeGroupItem:
-					m.previewPort.SetContent("")
-					m.previewContent = ""
+					if rep, ok := representativeSession(item); ok {
+						return m.loadPreviewDebounced(rep)
+					}
 				}
 				return m, nil
 			}
 
 			m.list.Select(0)
-			// Load preview for top item, clear for group items
+			// Load preview for top item or group representative
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				newModel, previewCmd := m.loadPreviewDebounced(item)
 				m = newModel
 				return m, tea.Batch(cmd, previewCmd)
 			case worktreeGroupItem:
-				m.previewPort.SetContent("")
-				m.previewContent = ""
+				if rep, ok := representativeSession(item); ok {
+					newModel, previewCmd := m.loadPreviewDebounced(rep)
+					m = newModel
+					return m, tea.Batch(cmd, previewCmd)
+				}
 			}
 		}
 
