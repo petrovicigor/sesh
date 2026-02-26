@@ -447,7 +447,7 @@ func TestBuildDisplayItems(t *testing.T) {
 		}
 	})
 
-	t.Run("expanded badge shows dormant worktrees below badged item", func(t *testing.T) {
+	t.Run("expanded badge shows all worktrees below badged item", func(t *testing.T) {
 		items := []list.Item{
 			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "tmux"}, displayName: " repo/main"},
 			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}, displayName: " repo ⎇ main"},
@@ -458,10 +458,10 @@ func TestBuildDisplayItems(t *testing.T) {
 		groups := buildWorktreeGroups(items, make(map[string]string), nil)
 		display := buildDisplayItems(items, groups, "repo", nil)
 
-		// repo/main (tmux, badged) + repo/develop + repo/feature = 3
-		if len(display) != 3 {
+		// repo/main (tmux, badged) + repo/main (child) + repo/develop + repo/feature = 4
+		if len(display) != 4 {
 			names := describeItems(display)
-			t.Fatalf("expected 3 items, got %d: %v", len(display), names)
+			t.Fatalf("expected 4 items, got %d: %v", len(display), names)
 		}
 
 		// First is badged tmux item
@@ -470,12 +470,25 @@ func TestBuildDisplayItems(t *testing.T) {
 			t.Error("expected badged tmux sessionItem first")
 		}
 
-		// Expanded dormant items follow (not including repo/main which is active)
+		// All worktrees (including active ones) appear as children
+		childNames := make([]string, 0)
 		for _, item := range display[1:] {
 			si := item.(sessionItem)
-			if si.session.Name == "repo/main" {
-				t.Error("repo/main should not appear in expanded dormant list (it's active)")
+			childNames = append(childNames, si.session.Name)
+			if !si.groupChild {
+				t.Errorf("expected %s to be a group child", si.session.Name)
 			}
+		}
+		// repo/main should now appear in expanded children (consistent with dormant expansion)
+		found := false
+		for _, name := range childNames {
+			if name == "repo/main" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("repo/main should appear in expanded children, got: %v", childNames)
 		}
 	})
 
@@ -629,7 +642,7 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 }
 
 func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
-	t.Run("expanded dormant group with default does not duplicate default branch", func(t *testing.T) {
+	t.Run("expanded dormant group with default shows default branch as child", func(t *testing.T) {
 		items := []list.Item{
 			sessionItem{session: model.SeshSession{Name: "chase-search/feature-cdk", Src: "projects"}, displayName: " chase-search ⎇ feature-cdk"},
 			sessionItem{session: model.SeshSession{Name: "chase-search/review", Src: "projects"}, displayName: " chase-search ⎇ review"},
@@ -642,11 +655,10 @@ func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
 		groups := buildWorktreeGroups(items, defaults, nil)
 		display := buildDisplayItems(items, groups, "chase-search", nil) // expanded
 
-		// Group header + 4 children (review, develop, regression-testing, chase-search bare)
-		// feature-cdk is already in the group header — should NOT appear again
-		if len(display) != 5 {
+		// Group header + 5 children (all worktrees including the default branch)
+		if len(display) != 6 {
 			names := describeItems(display)
-			t.Fatalf("expected 5 items (1 group + 4 children), got %d: %v", len(display), names)
+			t.Fatalf("expected 6 items (1 group + 5 children), got %d: %v", len(display), names)
 		}
 
 		// First should be group item
@@ -658,12 +670,17 @@ func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
 			t.Errorf("expected default 'feature-cdk', got %q", gi.defaultBranch)
 		}
 
-		// Remaining items should NOT include feature-cdk
-		for i, item := range display[1:] {
+		// Default branch (feature-cdk) MUST appear as a selectable child
+		found := false
+		for _, item := range display[1:] {
 			si := item.(sessionItem)
 			if si.session.Name == "chase-search/feature-cdk" {
-				t.Errorf("item %d: feature-cdk should not appear in expanded list (already in group header)", i+1)
+				found = true
+				break
 			}
+		}
+		if !found {
+			t.Errorf("default branch feature-cdk should appear as a selectable child when expanded")
 		}
 	})
 

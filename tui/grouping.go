@@ -297,12 +297,12 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 					result[lastIdx] = lastItem
 				}
 
-				// If expanded, show dormant worktrees below
+				// If expanded, show all worktrees below (including active ones for consistency)
 				if expandedGroup == repoName {
-					dormant := sortBareRootFirst(dormantWorktrees(gi.uniqueItems, group.tmuxNames), repoName)
-					for i, wt := range dormant {
+					children := sortBareRootFirst(gi.uniqueItems, repoName)
+					for i, wt := range children {
 						wt.groupChild = true
-						wt.groupLastChild = (i == len(dormant)-1)
+						wt.groupLastChild = (i == len(children)-1)
 						if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
 							wt.bareRoot = true
 						}
@@ -341,14 +341,10 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				}
 				result = append(result, groupItem)
 
-				// If expanded, show all unique worktrees below
+				// If expanded, show all unique worktrees below (including default branch)
 				if expandedGroup == repoName {
 					children := make([]sessionItem, 0, len(gi.uniqueItems))
 					for _, wt := range gi.uniqueItems {
-						// Skip the default branch — it's already represented in the group header
-						if group.defaultBranch != "" && wt.session.Name == repoName+"/"+group.defaultBranch {
-							continue
-						}
 						children = append(children, wt)
 					}
 					children = sortBareRootFirst(children, repoName)
