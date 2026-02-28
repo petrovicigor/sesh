@@ -16,6 +16,7 @@ type KeyMap struct {
 	SetDefault       key.Binding
 	RepoFocus         key.Binding
 	WorkspaceManager  key.Binding
+	ToggleGroupMode   key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -32,8 +33,8 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("ctrl+a", "all sessions"),
 	),
 	FilterConfig: key.NewBinding(
-		key.WithKeys("ctrl+g"),
-		key.WithHelp("ctrl+g", "config only"),
+		key.WithHelp("", "config only"),
+		// Unbound — ctrl+g reassigned to ToggleGroupMode
 	),
 	FilterZoxide: key.NewBinding(
 		key.WithKeys("ctrl+x"),
@@ -70,5 +71,9 @@ var DefaultKeyMap = KeyMap{
 	WorkspaceManager: key.NewBinding(
 		key.WithKeys("ctrl+w"),
 		key.WithHelp("ctrl+w", "workspace manager"),
+	),
+	ToggleGroupMode: key.NewBinding(
+		key.WithKeys("ctrl+g"),
+		key.WithHelp("ctrl+g", "toggle group mode"),
 	),
 }

@@ -26,6 +26,7 @@ var (
 	treeEndStr         = treeConnStyle.Render("└")                 // Pre-rendered last connector
 	bareRootStr        = treeConnStyle.Render("(bare root)")       // Pre-rendered bare repo label
 	separatorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	attentionIconStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("🖐️") + " " // magenta hand
 )
 
 // extractIconPrefix derives the ANSI icon prefix from a pre-computed displayName.
@@ -60,6 +61,7 @@ type compactDelegate struct {
 	processInfo      *map[string]string
 	expandedGroup    *string
 	worktreeDefaults *map[string]string
+	claudeAttention  *map[string]bool
 }
 
 
@@ -126,6 +128,16 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			}
 		} else {
 			str = v.displayName
+		}
+
+		// Override tmux icon with attention indicator if CC session is awaiting
+		if v.session.Src == "tmux" && d.claudeAttention != nil {
+			if (*d.claudeAttention)[v.session.Name] {
+				// Replace icon prefix: swap blue  with magenta 🖐️
+				if v.iconPrefix != "" {
+					str = attentionIconStr + strings.TrimPrefix(str, v.iconPrefix)
+				}
+			}
 		}
 
 		// Add process indicator if available

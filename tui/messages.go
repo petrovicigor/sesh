@@ -35,3 +35,7 @@ type DefaultsSavedMsg struct {
 type ExcludesSavedMsg struct {
 	Err error // nil on success
 }
+
+type ClaudeAttentionMsg struct {
+	Sessions map[string]bool // tmux session name -> needs attention
+}

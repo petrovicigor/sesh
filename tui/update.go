@@ -44,12 +44,12 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	}
 
 	*m.expandedGroup = repoName
-	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup, m.workspacePrefixes)
+	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup, m.workspacePrefixes, m.groupMode)
 
 	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
-	m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
+	m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -74,15 +74,17 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 				continue
 			}
 			if foundBadgeOrHeader {
-				// Match worktree items (repo/branch) or bare repo items (exact name match)
-				if strings.HasPrefix(v.session.Name, repoName+"/") || v.session.Name == repoName {
+				// Match worktree items belonging to this group (works for both package-first and branch-first)
+				itemKey := groupKeyForItem(v.session.Name, v.session.Src, m.workspacePrefixes, m.groupMode)
+				if itemKey == repoName || v.session.Name == repoName {
 					targetIndex = i
 					goto found
 				}
 			}
 			// For active groups with no dormant: target first active item
 			if group != nil && !foundBadgeOrHeader && strings.Contains(v.session.Name, "/") {
-				if strings.HasPrefix(v.session.Name, repoName+"/") && !group.tmuxNames[v.session.Name] {
+				itemKey := groupKeyForItem(v.session.Name, v.session.Src, m.workspacePrefixes, m.groupMode)
+				if itemKey == repoName && !group.tmuxNames[v.session.Name] {
 					targetIndex = i
 					goto found
 				}
@@ -120,12 +122,12 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	}
 
 	*m.expandedGroup = ""
-	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes)
+	displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes, m.groupMode)
 
 	// Swap items in-place without leaving filter mode — avoids layout shift
 	m.lastFilter = "" // Prevent filter transition from overwriting items
 	m.list.SetItems(displayItems)
-	m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
+	m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -207,7 +209,7 @@ func (m Model) exitWorkspaceManager() (Model, tea.Cmd) {
 	reloadCmd := loadSessionsWithFilter(m.lister, m.currentFilter)
 
 	// Restore title
-	m.list.Title = getFilterTitle(m.currentFilter)
+	m.list.Title = getFilterTitle(m.currentFilter, m.groupMode)
 
 	return m, tea.Batch(saveCmd, reloadCmd)
 }
@@ -363,18 +365,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Build worktree groups
 		m.allItems = items
-		m.worktreeGroups = buildWorktreeGroups(items, *m.worktreeDefaults, m.workspacePrefixes)
+		m.worktreeGroups = buildWorktreeGroups(items, *m.worktreeDefaults, m.workspacePrefixes, m.groupMode)
 		*m.expandedGroup = ""
 
 		// Use collapsed display items
-		displayItems := buildDisplayItems(items, m.worktreeGroups, "", m.workspacePrefixes)
+		displayItems := buildDisplayItems(items, m.worktreeGroups, "", m.workspacePrefixes, m.groupMode)
 		m.list.SetItems(displayItems)
 
 		// Update filter function with display items
-		m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
+		m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 
 		// Update title based on current filter
-		m.list.Title = getFilterTitle(m.currentFilter)
+		m.list.Title = getFilterTitle(m.currentFilter, m.groupMode)
 
 		// Check if we should preserve state (from session deletion)
 		if msg.PreserveCursorIndex >= 0 {
@@ -484,6 +486,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logDebug("DEBUG: Process detection complete, %d processes found", len(msg.Processes))
 		return m, nil
 
+	case ClaudeAttentionMsg:
+		// Update map in-place to preserve delegate's pointer reference
+		for k := range *m.claudeAttention {
+			delete(*m.claudeAttention, k)
+		}
+		for k, v := range msg.Sessions {
+			(*m.claudeAttention)[k] = v
+		}
+		return m, nil
+
 	case DefaultsSavedMsg:
 		if msg.Err != nil {
 			logDebug("DEBUG: Failed to save defaults: %v", msg.Err)
@@ -537,7 +549,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item.groupRepo != "" {
 					targetGroup = item.groupRepo
 				} else if strings.Contains(item.session.Name, "/") {
-					groupKey := groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes)
+					groupKey := groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes, m.groupMode)
 					if _, isGrouped := m.worktreeGroups[groupKey]; isGrouped {
 						targetGroup = groupKey
 					}
@@ -618,6 +630,112 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadSessionsWithFilter(m.lister, FilterZoxide)
 			}
 
+		case key.Matches(msg, m.keys.ToggleGroupMode):
+			// Toggle workspace grouping between package-first and branch-first.
+			// Remember current session name for cursor restoration.
+			// For group items, save a worktree session name (not the group key)
+			// so it can be found in the new grouping mode.
+			var prevSessionName string
+			var prevIsWorkspace bool
+			switch sel := m.list.SelectedItem().(type) {
+			case sessionItem:
+				prevSessionName = sel.session.Name
+				prevIsWorkspace = sel.session.Src == "workspace" || isWorkspaceTmuxSession(sel.session.Name, m.workspacePrefixes)
+			case worktreeGroupItem:
+				if len(sel.worktrees) > 0 {
+					prevSessionName = sel.worktrees[0].session.Name
+					prevIsWorkspace = sel.worktrees[0].session.Src == "workspace" || isWorkspaceTmuxSession(sel.worktrees[0].session.Name, m.workspacePrefixes)
+				}
+			}
+
+			if m.groupMode == GroupByPackage {
+				m.groupMode = GroupByBranch
+			} else {
+				m.groupMode = GroupByPackage
+			}
+			m.repoFocusFilter = ""
+			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults, m.workspacePrefixes, m.groupMode)
+
+			// Auto-expand the workspace group the user was looking at so the
+			// pivot shows the same sessions reorganized, not hidden behind a badge.
+			autoExpandGroup := ""
+			if prevIsWorkspace && prevSessionName != "" {
+				newKey := groupKeyForItem(prevSessionName, "workspace", m.workspacePrefixes, m.groupMode)
+				if _, exists := m.worktreeGroups[newKey]; exists {
+					autoExpandGroup = newKey
+				}
+			}
+			*m.expandedGroup = autoExpandGroup
+
+			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, autoExpandGroup, m.workspacePrefixes, m.groupMode)
+			m.list.SetItems(displayItems)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
+			m.list.SetFilterText("")
+			m.list.SetFilterState(list.Filtering)
+			m.list.SetSize(m.list.Width(), m.list.Height())
+
+			// Find the previous session in the (now expanded) display items.
+			targetIndex := 0
+			logDebug("DEBUG toggleGroup: prevSessionName=%q autoExpand=%q displayItems=%d mode=%d", prevSessionName, autoExpandGroup, len(displayItems), m.groupMode)
+			if prevSessionName != "" {
+				// Exact session name match (works well with auto-expanded groups)
+				for i, listItem := range displayItems {
+					switch v := listItem.(type) {
+					case sessionItem:
+						if v.session.Name == prevSessionName {
+							targetIndex = i
+							goto toggleFound
+						}
+					case worktreeGroupItem:
+						if v.repoName == prevSessionName {
+							targetIndex = i
+							goto toggleFound
+						}
+						for _, wt := range v.worktrees {
+							if wt.session.Name == prevSessionName {
+								targetIndex = i
+								goto toggleFound
+							}
+						}
+					}
+				}
+
+				// Fallback: find any item from the same workspace prefix
+				for _, prefix := range m.workspacePrefixes {
+					if strings.HasPrefix(prevSessionName, prefix+"/") {
+						for i, listItem := range displayItems {
+							switch v := listItem.(type) {
+							case sessionItem:
+								if strings.HasPrefix(v.session.Name, prefix+"/") {
+									targetIndex = i
+									goto toggleFound
+								}
+							case worktreeGroupItem:
+								if strings.HasPrefix(v.repoName, prefix+"/") || v.repoName == prefix {
+									targetIndex = i
+									goto toggleFound
+								}
+							}
+						}
+					}
+				}
+				logDebug("DEBUG toggleGroup: NO MATCH found, defaulting to 0")
+			}
+		toggleFound:
+			logDebug("DEBUG toggleGroup: selecting index %d", targetIndex)
+			m.list.Select(targetIndex)
+			m.list.Title = getFilterTitle(m.currentFilter, m.groupMode)
+			// Load preview for selected item
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				return m.loadPreviewDebounced(item)
+			case worktreeGroupItem:
+				if rep, ok := representativeSession(item); ok {
+					return m.loadPreviewDebounced(rep)
+				}
+			}
+			return m, nil
+
 		case key.Matches(msg, m.keys.Delete):
 			// Delete session if it's a tmux session
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -669,10 +787,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				if strings.Contains(item.session.Name, "/") {
-					groupKey := groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes)
+					groupKey := groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes, m.groupMode)
 					if _, isGrouped := m.worktreeGroups[groupKey]; isGrouped {
 						repoName = groupKey
-						branchName = item.session.Name[len(groupKey)+1:]
+						if strings.HasPrefix(item.session.Name, groupKey+"/") {
+							branchName = item.session.Name[len(groupKey)+1:]
+						} else {
+							// Branch-first mode: last path segment is the branch
+							lastSlash := strings.LastIndex(item.session.Name, "/")
+							if lastSlash > 0 {
+								branchName = item.session.Name[lastSlash+1:]
+							}
+						}
 					}
 				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
 					// Bare repo item in a worktree group — clear default
@@ -698,13 +824,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Rebuild groups with updated defaults, preserve expanded state
 			cursorIndex := m.list.Index()
-			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults, m.workspacePrefixes)
-			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup, m.workspacePrefixes)
+			m.worktreeGroups = buildWorktreeGroups(m.allItems, *m.worktreeDefaults, m.workspacePrefixes, m.groupMode)
+			displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, *m.expandedGroup, m.workspacePrefixes, m.groupMode)
 
 			// Swap items in-place without leaving filter mode
 			m.lastFilter = ""
 			m.list.SetItems(displayItems)
-			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
 			m.list.SetSize(m.list.Width(), m.list.Height())
@@ -723,7 +849,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				if strings.Contains(item.session.Name, "/") {
-					repoName = groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes)
+					repoName = groupKeyForItem(item.session.Name, item.session.Src, m.workspacePrefixes, m.groupMode)
 				} else if _, isGrouped := m.worktreeGroups[item.session.Name]; isGrouped {
 					repoName = item.session.Name
 				}
@@ -742,7 +868,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Clear focus — restore normal view
 				m.repoFocusFilter = ""
 				*m.expandedGroup = ""
-				displayItems = buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes)
+				displayItems = buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes, m.groupMode)
 
 				for i, listItem := range displayItems {
 					if gi, ok := listItem.(worktreeGroupItem); ok && gi.repoName == repoName {
@@ -751,7 +877,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				m.list.Title = getFilterTitle(m.currentFilter)
+				m.list.Title = getFilterTitle(m.currentFilter, m.groupMode)
 			} else {
 				// Set focus — filter to only this repo's worktrees
 				m.repoFocusFilter = repoName
@@ -760,7 +886,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				displayItems = make([]list.Item, 0)
 				for _, item := range m.allItems {
 					if si, ok := item.(sessionItem); ok {
-						if strings.HasPrefix(si.session.Name, repoName+"/") || si.session.Name == repoName {
+						itemKey := groupKeyForItem(si.session.Name, si.session.Src, m.workspacePrefixes, m.groupMode)
+						if itemKey == repoName || si.session.Name == repoName {
 							displayItems = append(displayItems, item)
 						}
 					}
@@ -773,7 +900,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Swap items in-place without leaving filter mode — avoids layout shift
 			m.lastFilter = "" // Prevent filter transition from overwriting items
 			m.list.SetItems(displayItems)
-			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
+			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
 			// SetFilterState doesn't call updatePagination(), but it changes titleView()
@@ -847,7 +974,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if prevFilter == "" && currentFilter != "" {
 				// Swap to full items for fuzzy search
 				*m.expandedGroup = ""
-				m.list.Filter = seshFilter(m.allItems, m.frecencyScores, m.workspacePrefixes)
+				m.list.Filter = seshFilter(m.allItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 				m.list.SetItems(m.allItems)
 				// Re-apply filter text after item swap
 				m.list.SetFilterText(currentFilter)
@@ -858,9 +985,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Must return early to avoid the stale async filter command from
 			// m.list.Update(msg) overriding our grouped displayItems.
 			if prevFilter != "" && currentFilter == "" {
-				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes)
+				displayItems := buildDisplayItems(m.allItems, m.worktreeGroups, "", m.workspacePrefixes, m.groupMode)
 				m.list.SetItems(displayItems)
-				m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes)
+				m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 				m.list.SetFilterText("")
 				m.list.SetFilterState(list.Filtering)
 				m.list.SetSize(m.list.Width(), m.list.Height())
@@ -902,15 +1029,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func getFilterTitle(filter FilterType) string {
+func getFilterTitle(filter FilterType, mode GroupMode) string {
+	var base string
 	switch filter {
 	case FilterConfig:
-		return "⚙️ config"
+		base = "⚙️ config"
 	case FilterZoxide:
-		return "📁 zoxide"
+		base = "📁 zoxide"
 	default:
-		return "⚡ Sesh Sessions"
+		base = "⚡ Sesh Sessions"
 	}
+	if mode == GroupByBranch {
+		base += " \033[240m[branch]\033[39m"
+	}
+	return base
 }
 
 // partitionItemsByTmux groups tmux sessions first, then all other sessions

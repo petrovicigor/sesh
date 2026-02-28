@@ -21,7 +21,7 @@ import (
 // tmux sessions winning remaining ties.
 // Worktree siblings (same repo prefix) are grouped together, ordered by
 // the best score in the group.
-func seshFilter(items []list.Item, frecencyScores map[string]float64, workspacePrefixes []string) list.FilterFunc {
+func seshFilter(items []list.Item, frecencyScores map[string]float64, workspacePrefixes []string, mode GroupMode) list.FilterFunc {
 	return func(term string, targets []string) []list.Rank {
 		if term == "" {
 			return nil
@@ -57,7 +57,7 @@ func seshFilter(items []list.Item, frecencyScores map[string]float64, workspaceP
 			// Determine repo group: items with "/" get grouped by prefix
 			repo := ""
 			if strings.Contains(name, "/") {
-				repo = groupKeyForItem(name, src, workspacePrefixes)
+				repo = groupKeyForItem(name, src, workspacePrefixes, mode)
 			}
 
 			// Look up frecency score for tiebreaking
@@ -173,6 +173,8 @@ type Model struct {
 	repoFocusFilter   string                   // repo name for Ctrl+T focus ("" = no focus)
 	frecencyScores    map[string]float64       // frecency scores for filter tiebreaking
 	workspacePrefixes []string                 // workspace config names for group key extraction
+	groupMode         GroupMode                // current workspace grouping mode (package vs branch)
+	claudeAttention   *map[string]bool         // shared with delegate: tmux session name -> needs attention
 
 	// Workspace manager mode
 	workspaceManagerMode bool                     // true when in workspace manager mode
@@ -225,9 +227,9 @@ func newModel(
 	logDebug("newModel: partitioned by tmux")
 
 	// Build worktree groups and create collapsed display items
-	worktreeGroups := buildWorktreeGroups(items, worktreeDefaults, workspacePrefixes)
+	worktreeGroups := buildWorktreeGroups(items, worktreeDefaults, workspacePrefixes, GroupByPackage)
 	logDebug("newModel: %d worktree groups built", len(worktreeGroups))
-	displayItems := buildDisplayItems(items, worktreeGroups, "", workspacePrefixes)
+	displayItems := buildDisplayItems(items, worktreeGroups, "", workspacePrefixes, GroupByPackage)
 	logDebug("newModel: %d display items built", len(displayItems))
 
 	// Create model instance first (we need to pass processInfo pointer to delegate)
@@ -242,6 +244,7 @@ func newModel(
 		pendingPreview:   "",
 		lastPreviewKey:   "",
 		processInfo:      &map[string]string{},
+		claudeAttention:  &map[string]bool{},
 		allItems:         items,
 		worktreeGroups:   worktreeGroups,
 		expandedGroup:    new(string),
@@ -259,7 +262,7 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults}
+	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention}
 	l := list.New(displayItems, delegate, listWidth, 24)
 	l.Title = "⚡ Sesh Sessions" // Set initial title
 	l.SetShowStatusBar(false)  // Hide item count
@@ -269,7 +272,7 @@ func newModel(
 	l.SetShowHelp(false)  // Hide help to keep UI clean
 
 	// Use custom filter with fzf-style scoring, frecency tiebreaking
-	l.Filter = seshFilter(displayItems, frecencyScores, workspacePrefixes)
+	l.Filter = seshFilter(displayItems, frecencyScores, workspacePrefixes, GroupByPackage)
 
 	// Create preview viewport
 	vp := viewport.New(previewWidth, 24)
@@ -328,9 +331,9 @@ func (m Model) Init() tea.Cmd {
 	if m.list.SelectedItem() != nil {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			logDebug("Init: queuing preview load for %q", item.session.Name)
-			return tea.Batch(filterCmd, loadPreview(m.previewer, item.session))
+			return tea.Batch(filterCmd, loadPreview(m.previewer, item.session), checkClaudeAttention())
 		}
 	}
 
-	return filterCmd
+	return tea.Batch(filterCmd, checkClaudeAttention())
 }

@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/joshmedeski/sesh/v2/claude"
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
@@ -201,6 +203,19 @@ func detectAllProcesses() tea.Cmd {
 		}
 		logDebug("DEBUG: Detected %d processes", len(processes))
 		return ProcessInfoMsg{Processes: processes}
+	}
+}
+
+// checkClaudeAttention queries Claude's sessions.db for sessions needing user attention.
+// Returns a map of tmux session names that have awaiting CC sessions.
+func checkClaudeAttention() tea.Cmd {
+	return func() tea.Msg {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ClaudeAttentionMsg{Sessions: nil}
+		}
+		sessions, _ := claude.SessionsNeedingAttention(homeDir)
+		return ClaudeAttentionMsg{Sessions: sessions}
 	}
 }
 
