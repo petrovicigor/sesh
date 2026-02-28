@@ -7,17 +7,69 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 )
 
+// GroupMode controls how workspace sessions are grouped in the TUI.
+type GroupMode int
+
+const (
+	// GroupByPackage groups workspace sessions by sub-project (default).
+	// e.g., mono/packages/ui → develop, feature-x
+	GroupByPackage GroupMode = iota
+	// GroupByBranch groups workspace sessions by branch/worktree.
+	// e.g., mono/develop → packages/ui, packages/api
+	GroupByBranch
+)
+
 // groupKeyForItem returns the worktree group key for a session item.
-// For workspace items, the group key is everything before the last "/" (sub-project path).
-// For regular projects/tmux, the group key is everything before the first "/" (repo name).
-func groupKeyForItem(name, src string, workspacePrefixes []string) string {
+// For workspace items in GroupByPackage: key = everything before last "/" (sub-project path).
+// For workspace items in GroupByBranch: key = {workspace}/{branch}.
+// For regular projects/tmux: key = everything before first "/" (repo name), regardless of mode.
+func groupKeyForItem(name, src string, workspacePrefixes []string, mode GroupMode) string {
 	if src == "workspace" || isWorkspaceTmuxSession(name, workspacePrefixes) {
+		if mode == GroupByBranch {
+			return branchFirstKey(name, workspacePrefixes)
+		}
 		lastSlash := strings.LastIndex(name, "/")
 		if lastSlash > 0 {
 			return name[:lastSlash]
 		}
 	}
 	return strings.SplitN(name, "/", 2)[0]
+}
+
+// branchFirstKey extracts {workspace}/{branch} from a workspace session name.
+// e.g., "mono/packages/ui/develop" → "mono/develop"
+func branchFirstKey(name string, workspacePrefixes []string) string {
+	for _, prefix := range workspacePrefixes {
+		if strings.HasPrefix(name, prefix+"/") {
+			lastSlash := strings.LastIndex(name, "/")
+			if lastSlash > len(prefix) {
+				branch := name[lastSlash+1:]
+				return prefix + "/" + branch
+			}
+		}
+	}
+	// Fallback: first segment + "/" + last segment
+	lastSlash := strings.LastIndex(name, "/")
+	if lastSlash > 0 {
+		firstSlash := strings.Index(name, "/")
+		return name[:firstSlash] + "/" + name[lastSlash+1:]
+	}
+	return name
+}
+
+// workspaceChildLabel extracts the sub-project part from a workspace session name.
+// e.g., "mono/packages/ui/develop" → "packages/ui"
+func workspaceChildLabel(sessionName string, workspacePrefixes []string) string {
+	for _, prefix := range workspacePrefixes {
+		if strings.HasPrefix(sessionName, prefix+"/") {
+			rest := sessionName[len(prefix)+1:]
+			lastSlash := strings.LastIndex(rest, "/")
+			if lastSlash > 0 {
+				return rest[:lastSlash]
+			}
+		}
+	}
+	return sessionName
 }
 
 // isWorkspaceTmuxSession checks if a tmux session name matches a workspace pattern.
@@ -52,8 +104,9 @@ type groupInfo struct {
 
 // buildWorktreeGroups identifies worktree clusters from a flat session list.
 // Scans tmux, projects, and workspace sources to detect repos with 2+ unique worktree names.
-func buildWorktreeGroups(items []list.Item, defaults map[string]string, workspacePrefixes []string) map[string]*worktreeGroup {
+func buildWorktreeGroups(items []list.Item, defaults map[string]string, workspacePrefixes []string, mode GroupMode) map[string]*worktreeGroup {
 	groups := make(map[string]*worktreeGroup)
+	logDebug("DEBUG buildWorktreeGroups: mode=%d items=%d workspacePrefixes=%v", mode, len(items), workspacePrefixes)
 
 	for _, item := range items {
 		si, ok := item.(sessionItem)
@@ -67,7 +120,8 @@ func buildWorktreeGroups(items []list.Item, defaults map[string]string, workspac
 			continue
 		}
 
-		repoName := groupKeyForItem(si.session.Name, si.session.Src, workspacePrefixes)
+		repoName := groupKeyForItem(si.session.Name, si.session.Src, workspacePrefixes, mode)
+		logDebug("DEBUG buildWorktreeGroups: name=%q src=%q → groupKey=%q", si.session.Name, si.session.Src, repoName)
 		if groups[repoName] == nil {
 			groups[repoName] = &worktreeGroup{
 				repoName:      repoName,
@@ -115,7 +169,9 @@ func buildWorktreeGroups(items []list.Item, defaults map[string]string, workspac
 				hasWorkspace = true
 			}
 		}
+		logDebug("DEBUG buildWorktreeGroups: group=%q uniqueNames=%d hasWorkspace=%v", name, len(uniqueNames), hasWorkspace)
 		if len(uniqueNames) < 2 && !hasWorkspace {
+			logDebug("DEBUG buildWorktreeGroups: PRUNING group=%q (uniqueNames=%d, hasWorkspace=%v)", name, len(uniqueNames), hasWorkspace)
 			delete(groups, name)
 			continue
 		}
@@ -185,23 +241,28 @@ func representativeSession(group worktreeGroupItem) (sessionItem, bool) {
 
 // formatGroupDisplay creates the display string for a collapsed worktree group (no active sessions).
 // Uses folder icon (green) for projects, 📦 icon (magenta) for workspace groups.
-func formatGroupDisplay(repoName string, defaultBranch string, extraCount int, isWorkspace bool) string {
+func formatGroupDisplay(repoName string, defaultBranch string, extraCount int, isWorkspace bool, mode GroupMode) string {
 	icon := "\033[32m\uf114\033[39m" // green folder
 	if isWorkspace {
 		icon = "\033[35m📦\033[39m" // magenta workspace
 	}
 	badge := "\033[240m(+)\033[39m"
-	if defaultBranch != "" {
-		name := repoName + " ⎇ " + defaultBranch
-		if extraCount > 0 {
-			return fmt.Sprintf("%s %s %s", icon, name, badge)
+
+	// In branch-first mode, repoName is "workspace/branch" — show as "workspace ⎇ branch"
+	displayName := repoName
+	if mode == GroupByBranch && isWorkspace {
+		parts := strings.SplitN(repoName, "/", 2)
+		if len(parts) == 2 {
+			displayName = parts[0] + " ⎇ " + parts[1]
 		}
-		return fmt.Sprintf("%s %s", icon, name)
+	} else if defaultBranch != "" {
+		displayName = repoName + " ⎇ " + defaultBranch
 	}
+
 	if extraCount > 0 {
-		return fmt.Sprintf("%s %s %s", icon, repoName, badge)
+		return fmt.Sprintf("%s %s %s", icon, displayName, badge)
 	}
-	return fmt.Sprintf("%s %s", icon, repoName)
+	return fmt.Sprintf("%s %s", icon, displayName)
 }
 
 // formatDormantBadge creates the ANSI badge string for dormant worktrees.
@@ -233,7 +294,8 @@ func sortBareRootFirst(children []sessionItem, repoName string) []sessionItem {
 // the last active one gets a (+N) badge appended for dormant worktrees.
 // For groups with no active sessions: collapsed group item as before.
 // expandedGroup is the repo name of the currently expanded group ("" = all collapsed).
-func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expandedGroup string, workspacePrefixes []string) []list.Item {
+func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expandedGroup string, workspacePrefixes []string, mode GroupMode) []list.Item {
+	logDebug("DEBUG buildDisplayItems: mode=%d expandedGroup=%q totalItems=%d groups=%d", mode, expandedGroup, len(items), len(groups))
 	// Pre-compute per-group data
 	info := make(map[string]*groupInfo)
 	for name, group := range groups {
@@ -244,6 +306,7 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 				active++
 			}
 		}
+		logDebug("DEBUG buildDisplayItems: group=%q active=%d dormant=%d tmuxNames=%v", name, active, len(unique)-active, group.tmuxNames)
 		info[name] = &groupInfo{
 			uniqueItems:  unique,
 			activeCount:  active,
@@ -266,7 +329,7 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 		if si.session.Src == "tmux" || si.session.Src == "projects" || si.session.Src == "workspace" {
 			var repoName string
 			if strings.Contains(si.session.Name, "/") {
-				repoName = groupKeyForItem(si.session.Name, si.session.Src, workspacePrefixes)
+				repoName = groupKeyForItem(si.session.Name, si.session.Src, workspacePrefixes, mode)
 			} else {
 				repoName = si.session.Name
 			}
@@ -292,10 +355,14 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 						if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
 							wt.bareRoot = true
 						}
-						// Reformat workspace tmux sessions to use ⎇ branch format.
-						// icon.go can't detect these as worktrees (sub-project path has no .git),
-						// so we reformat here using the group key as the repo prefix.
-						if strings.HasPrefix(wt.session.Name, repoName+"/") && len(wt.session.Name) > len(repoName)+1 {
+						// Reformat display for grouped items.
+						isWS := wt.session.Src == "workspace" || isWorkspaceTmuxSession(wt.session.Name, workspacePrefixes)
+						if mode == GroupByBranch && isWS {
+							// Branch-first: show sub-project name
+							subProject := workspaceChildLabel(wt.session.Name, workspacePrefixes)
+							wt.displayName = wt.iconPrefix + subProject
+						} else if strings.HasPrefix(wt.session.Name, repoName+"/") && len(wt.session.Name) > len(repoName)+1 {
+							// Package-first or non-workspace: show ⎇ branch format
 							branch := wt.session.Name[len(repoName)+1:]
 							if !strings.Contains(wt.displayName, "⎇") {
 								wt.displayName = wt.iconPrefix + repoName + " ⎇ " + branch
@@ -322,6 +389,10 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 						wt.groupLastChild = (i == len(children)-1)
 						if !strings.Contains(wt.session.Name, "/") && wt.session.Name == repoName {
 							wt.bareRoot = true
+						}
+						if mode == GroupByBranch {
+							subProject := workspaceChildLabel(wt.session.Name, workspacePrefixes)
+							wt.displayName = wt.iconPrefix + subProject
 						}
 						result = append(result, wt)
 					}
@@ -354,7 +425,7 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 					dormantCount:  gi.dormantCount,
 					totalCount:    len(gi.uniqueItems),
 					worktrees:     gi.uniqueItems,
-					displayName:   formatGroupDisplay(repoName, group.defaultBranch, badgeCount, groupIsWorkspace),
+					displayName:   formatGroupDisplay(repoName, group.defaultBranch, badgeCount, groupIsWorkspace, mode),
 				}
 				result = append(result, groupItem)
 
@@ -371,6 +442,10 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 							wt.bareRoot = true
 						}
 						wt.groupLastChild = (i == len(children)-1)
+						if mode == GroupByBranch {
+							subProject := workspaceChildLabel(wt.session.Name, workspacePrefixes)
+							wt.displayName = wt.iconPrefix + subProject
+						}
 						result = append(result, wt)
 					}
 				}
@@ -381,7 +456,7 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 			// already-inserted worktree group to avoid duplicates
 			var matchesGroup bool
 			if strings.Contains(si.session.Name, "/") {
-				repo := groupKeyForItem(si.session.Name, si.session.Src, workspacePrefixes)
+				repo := groupKeyForItem(si.session.Name, si.session.Src, workspacePrefixes, mode)
 				matchesGroup = insertedGroups[repo]
 			} else {
 				matchesGroup = insertedGroups[si.session.Name]
@@ -423,5 +498,15 @@ func buildDisplayItems(items []list.Item, groups map[string]*worktreeGroup, expa
 		result = newResult
 	}
 
+	for i, item := range result {
+		switch v := item.(type) {
+		case sessionItem:
+			logDebug("DEBUG buildDisplayItems result: [%d] session name=%q src=%q groupRepo=%q", i, v.session.Name, v.session.Src, v.groupRepo)
+		case worktreeGroupItem:
+			logDebug("DEBUG buildDisplayItems result: [%d] group repo=%q active=%d dormant=%d", i, v.repoName, v.activeCount, v.dormantCount)
+		case separatorItem:
+			logDebug("DEBUG buildDisplayItems result: [%d] separator", i)
+		}
+	}
 	return result
 }

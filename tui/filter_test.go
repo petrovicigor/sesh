@@ -86,7 +86,7 @@ func TestSeshFilter(t *testing.T) {
 			}
 
 			// Create filter and run it
-			filter := seshFilter(testSessions, nil, nil)
+			filter := seshFilter(testSessions, nil, nil, GroupByPackage)
 			ranks := filter(tc.searchTerm, targets)
 
 			if len(ranks) < tc.minResults {
@@ -134,7 +134,7 @@ func TestSeshFilter(t *testing.T) {
 func TestSeshFilterEdgeCases(t *testing.T) {
 	t.Run("Empty items list", func(t *testing.T) {
 		items := []list.Item{}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("test", []string{})
 		if len(ranks) != 0 {
 			t.Errorf("Expected 0 results for empty items, got %d", len(ranks))
@@ -145,7 +145,7 @@ func TestSeshFilterEdgeCases(t *testing.T) {
 		items := []list.Item{
 			sessionItem{session: model.SeshSession{Name: "test", Src: "tmux"}, displayName: "test"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("", []string{"test"})
 		if ranks != nil {
 			t.Errorf("Expected nil for empty search term, got %v", ranks)
@@ -156,7 +156,7 @@ func TestSeshFilterEdgeCases(t *testing.T) {
 		items := []list.Item{
 			sessionItem{session: model.SeshSession{Name: "test", Src: "tmux"}, displayName: "test"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("test", []string{"test"})
 		if len(ranks) != 1 {
 			t.Fatalf("Expected 1 result, got %d", len(ranks))
@@ -173,7 +173,7 @@ func TestSeshFilterEdgeCases(t *testing.T) {
 		items := []list.Item{
 			sessionItem{session: model.SeshSession{Name: "test", Src: "projects"}, displayName: "test"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("test", []string{"test"})
 		if len(ranks) != 1 {
 			t.Fatalf("Expected 1 result, got %d", len(ranks))
@@ -188,7 +188,7 @@ func TestSeshFilterEdgeCases(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "foo", Src: "tmux"}, displayName: "foo"},
 			sessionItem{session: model.SeshSession{Name: "bar", Src: "projects"}, displayName: "bar"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("xyz123notfound", []string{"foo", "bar"})
 		if len(ranks) != 0 {
 			t.Errorf("Expected 0 results for non-matching search, got %d", len(ranks))
@@ -200,7 +200,7 @@ func TestSeshFilterEdgeCases(t *testing.T) {
 			worktreeGroupItem{repoName: "myrepo", displayName: "myrepo (3)"},
 			sessionItem{session: model.SeshSession{Name: "myrepo-alt", Src: "tmux"}, displayName: "myrepo-alt"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("myrepo", []string{"myrepo (3)", "myrepo-alt"})
 		if len(ranks) == 0 {
 			t.Fatal("Expected results")
@@ -222,7 +222,7 @@ func TestSeshFilterTmuxTiebreaker(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "app-dev", Src: "projects"}, displayName: "app-dev"},
 			sessionItem{session: model.SeshSession{Name: "app-dev", Src: "tmux"}, displayName: "app-dev"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("app", []string{"app-dev", "app-dev"})
 
 		if len(ranks) < 2 {
@@ -242,7 +242,7 @@ func TestSeshFilterTmuxTiebreaker(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "backend", Src: "tmux"}, displayName: "backend"},
 			sessionItem{session: model.SeshSession{Name: "backend", Src: "projects"}, displayName: "backend"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("back", []string{"backend", "backend"})
 
 		if len(ranks) < 2 {
@@ -264,7 +264,7 @@ func TestSeshFilterTmuxTiebreaker(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "myapp", Src: "zoxide"}, displayName: "myapp"},
 		}
 		targets := []string{"app", "app-test", "application", "app-dev", "myapp"}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("app", targets)
 
 		// Should have results
@@ -305,7 +305,7 @@ func TestSeshFilterScoringBehavior(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "xchase-app", Src: "projects"}, displayName: "xchase-app"},
 			sessionItem{session: model.SeshSession{Name: "chase-cognito", Src: "projects"}, displayName: "chase-cognito"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("chase", []string{"xchase-app", "chase-cognito"})
 
 		if len(ranks) < 2 {
@@ -325,7 +325,7 @@ func TestSeshFilterScoringBehavior(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "chase-search/develop", Src: "tmux"}, displayName: "chase-search/develop"},
 			sessionItem{session: model.SeshSession{Name: "geoip/develop", Src: "projects"}, displayName: "geoip/develop"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("develop", []string{"chase-search/develop", "geoip/develop"})
 
 		if len(ranks) != 2 {
@@ -355,7 +355,7 @@ func TestSeshFilterScoringBehavior(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "dev", Src: "tmux"}, displayName: "dev"},
 			sessionItem{session: model.SeshSession{Name: "develop", Src: "projects"}, displayName: "develop"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("dev", []string{"dev", "develop"})
 
 		if len(ranks) < 2 {
@@ -395,7 +395,7 @@ func TestSeshFilterScoringBehavior(t *testing.T) {
 		}
 
 		for _, search := range testSearches {
-			filter := seshFilter(items, nil, nil)
+			filter := seshFilter(items, nil, nil, GroupByPackage)
 			ranks := filter(search.term, targets)
 
 			if len(ranks) < search.minResults {
@@ -423,7 +423,7 @@ func TestSeshFilterFrecencyTiebreaker(t *testing.T) {
 		}
 		// Give the worse-scoring item massive frecency
 		frecency := map[string]float64{"my-backend-api-proxy": 100.0}
-		filter := seshFilter(items, frecency, nil)
+		filter := seshFilter(items, frecency, nil, GroupByPackage)
 		ranks := filter("app", []string{"my-backend-api-proxy", "app-dev"})
 
 		if len(ranks) < 2 {
@@ -445,7 +445,7 @@ func TestSeshFilterFrecencyTiebreaker(t *testing.T) {
 		}
 		// "api-service" has higher frecency
 		frecency := map[string]float64{"api-service": 10.0, "api-server": 0.0}
-		filter := seshFilter(items, frecency, nil)
+		filter := seshFilter(items, frecency, nil, GroupByPackage)
 		ranks := filter("api-ser", []string{"api-server", "api-service"})
 
 		if len(ranks) < 2 {
@@ -464,7 +464,7 @@ func TestSeshFilterFrecencyTiebreaker(t *testing.T) {
 		items := []list.Item{
 			sessionItem{session: model.SeshSession{Name: "test", Src: "tmux"}, displayName: "test"},
 		}
-		filter := seshFilter(items, nil, nil)
+		filter := seshFilter(items, nil, nil, GroupByPackage)
 		ranks := filter("test", []string{"test"})
 		if len(ranks) != 1 {
 			t.Fatalf("Expected 1 result, got %d", len(ranks))

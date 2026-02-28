@@ -18,7 +18,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "other-project", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 1 {
 			t.Fatalf("expected 1 group, got %d", len(groups))
@@ -39,7 +39,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "geoip/feature-x", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		group := groups["geoip"]
 		if group == nil {
@@ -63,7 +63,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "myproject", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 0 {
 			t.Errorf("expected 0 groups, got %d", len(groups))
@@ -79,7 +79,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo-b/hotfix", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 2 {
 			t.Fatalf("expected 2 groups, got %d", len(groups))
@@ -98,7 +98,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "igorpetrovic/dotfiles", Src: "config"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 0 {
 			t.Errorf("expected 0 groups (needs >= 2 unique names), got %d", len(groups))
@@ -112,7 +112,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "chase-monorepo/review", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 1 {
 			t.Fatalf("expected 1 group, got %d", len(groups))
@@ -135,7 +135,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "tmux"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 1 {
 			t.Fatalf("expected 1 group, got %d", len(groups))
@@ -159,7 +159,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 		}
 
 		defaults := map[string]string{"repo": "main"}
-		groups := buildWorktreeGroups(items, defaults, nil)
+		groups := buildWorktreeGroups(items, defaults, nil, GroupByPackage)
 
 		if groups["repo"].defaultBranch != "main" {
 			t.Errorf("expected defaultBranch 'main', got %q", groups["repo"].defaultBranch)
@@ -171,7 +171,7 @@ func TestBuildWorktreeGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 0 {
 			t.Errorf("expected 0 groups (single worktree = no group), got %d", len(groups))
@@ -265,7 +265,7 @@ func TestDeduplicateWorktrees(t *testing.T) {
 
 func TestFormatGroupDisplay(t *testing.T) {
 	t.Run("format with default branch", func(t *testing.T) {
-		got := formatGroupDisplay("chase-monorepo", "develop", 3, false)
+		got := formatGroupDisplay("chase-monorepo", "develop", 3, false, GroupByPackage)
 		if !strings.Contains(got, "chase-monorepo ⎇ develop") {
 			t.Errorf("expected 'chase-monorepo ⎇ develop' in display, got %q", got)
 		}
@@ -275,7 +275,7 @@ func TestFormatGroupDisplay(t *testing.T) {
 	})
 
 	t.Run("format without default branch", func(t *testing.T) {
-		got := formatGroupDisplay("chase-monorepo", "", 4, false)
+		got := formatGroupDisplay("chase-monorepo", "", 4, false, GroupByPackage)
 		if !strings.Contains(got, "chase-monorepo") {
 			t.Errorf("expected repo name in display, got %q", got)
 		}
@@ -288,14 +288,14 @@ func TestFormatGroupDisplay(t *testing.T) {
 	})
 
 	t.Run("no badge when extra count is zero", func(t *testing.T) {
-		got := formatGroupDisplay("repo", "main", 0, false)
+		got := formatGroupDisplay("repo", "main", 0, false, GroupByPackage)
 		if strings.Contains(got, "(+") {
 			t.Errorf("should not contain (+N) when count is 0, got %q", got)
 		}
 	})
 
 	t.Run("workspace icon for workspace groups", func(t *testing.T) {
-		got := formatGroupDisplay("mono/packages/auth", "develop", 0, true)
+		got := formatGroupDisplay("mono/packages/auth", "develop", 0, true, GroupByPackage)
 		if !strings.Contains(got, "📦") {
 			t.Errorf("expected workspace icon 📦, got %q", got)
 		}
@@ -324,8 +324,8 @@ func TestBuildDisplayItems(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "other-project", Src: "projects"}, displayName: " other-project"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// sesh (tmux) + separator + chase-monorepo[group] + other-project = 4
 		if len(display) != 4 {
@@ -363,8 +363,8 @@ func TestBuildDisplayItems(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// repo/main + repo/develop(+1 badge) = 2 items
 		if len(display) != 2 {
@@ -402,8 +402,8 @@ func TestBuildDisplayItems(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// 2 active tmux items, no dormant = no badge
 		if len(display) != 2 {
@@ -429,8 +429,8 @@ func TestBuildDisplayItems(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// repo/main (tmux, with badge +2) = 1 item
 		if len(display) != 1 {
@@ -455,8 +455,8 @@ func TestBuildDisplayItems(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "repo", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "repo", nil, GroupByPackage)
 
 		// repo/main (tmux, badged) + repo/main (child) + repo/develop + repo/feature = 4
 		if len(display) != 4 {
@@ -500,8 +500,8 @@ func TestBuildDisplayItems(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// The badged item should have (+) for dormant worktrees
 		si := display[0].(sessionItem)
@@ -517,8 +517,8 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/main", Src: "projects"}, displayName: " repo ⎇ main"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		if len(display) != 1 {
 			t.Fatalf("expected 1 item, got %d", len(display))
@@ -534,8 +534,8 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "another", Src: "config"}, displayName: " another"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		if len(display) != 2 {
 			t.Fatalf("expected 2 items, got %d", len(display))
@@ -551,8 +551,8 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// sesh (tmux) + separator + dotfiles + repo group + mydir = 5 items
 		if len(display) != 5 {
@@ -588,8 +588,8 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "tmux"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// sesh + repo/main + repo/develop = 3 (all active, no badge needed)
 		if len(display) != 3 {
@@ -613,8 +613,8 @@ func TestBuildDisplayItemsEdgeCases(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// repo/main, repo/develop(+), sesh = 3 (group items clustered at first encounter)
 		if len(display) != 3 {
@@ -652,8 +652,8 @@ func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
 		}
 
 		defaults := map[string]string{"chase-search": "feature-cdk"}
-		groups := buildWorktreeGroups(items, defaults, nil)
-		display := buildDisplayItems(items, groups, "chase-search", nil) // expanded
+		groups := buildWorktreeGroups(items, defaults, nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "chase-search", nil, GroupByPackage) // expanded
 
 		// Group header + 5 children (all worktrees including the default branch)
 		if len(display) != 6 {
@@ -691,8 +691,8 @@ func TestBuildDisplayItemsDefaultBranchNoDuplication(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/feature", Src: "projects"}, displayName: " repo ⎇ feature"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil) // no defaults
-		display := buildDisplayItems(items, groups, "repo", nil)           // expanded
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage) // no defaults
+		display := buildDisplayItems(items, groups, "repo", nil, GroupByPackage)           // expanded
 
 		// Group header + 3 children (no default to skip)
 		if len(display) != 4 {
@@ -710,8 +710,8 @@ func TestBuildDisplayItemsSeparator(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "myproject", Src: "projects"}, displayName: " myproject"},
 			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}, displayName: " mydir"},
 		}
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		if len(display) != 5 {
 			names := describeItems(display)
@@ -727,8 +727,8 @@ func TestBuildDisplayItemsSeparator(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "myproject", Src: "projects"}, displayName: " myproject"},
 			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}, displayName: " mydir"},
 		}
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		for _, item := range display {
 			if _, ok := item.(separatorItem); ok {
@@ -742,8 +742,8 @@ func TestBuildDisplayItemsSeparator(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "sesh", Src: "tmux"}, displayName: " sesh"},
 			sessionItem{session: model.SeshSession{Name: "dotfiles", Src: "tmux"}, displayName: " dotfiles"},
 		}
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		for _, item := range display {
 			if _, ok := item.(separatorItem); ok {
@@ -759,8 +759,8 @@ func TestBuildDisplayItemsSeparator(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "repo/develop", Src: "projects"}, displayName: " repo ⎇ develop"},
 			sessionItem{session: model.SeshSession{Name: "other", Src: "zoxide"}, displayName: " other"},
 		}
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		hasSeparator := false
 		for _, item := range display {
@@ -788,8 +788,8 @@ func TestBuildDisplayItemsSeparatorWithGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mydir", Src: "zoxide"}, displayName: " mydir"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// Count separators — should be exactly 1
 		sepCount := 0
@@ -833,9 +833,9 @@ func TestBuildDisplayItemsSeparatorWithGroups(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "other", Src: "zoxide"}, displayName: " other"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 		// Expanded: dormant children appear after the tmux item
-		display := buildDisplayItems(items, groups, "repo", nil)
+		display := buildDisplayItems(items, groups, "repo", nil, GroupByPackage)
 
 		// Separator should come after the expanded group (tmux + dormant children), before "other"
 		hasSeparator := false
@@ -889,35 +889,35 @@ func describeItems(items []list.Item) []string {
 
 func TestGroupKeyForItem(t *testing.T) {
 	t.Run("regular project uses first slash", func(t *testing.T) {
-		key := groupKeyForItem("geoip/develop", "projects", nil)
+		key := groupKeyForItem("geoip/develop", "projects", nil, GroupByPackage)
 		if key != "geoip" {
 			t.Errorf("expected 'geoip', got %q", key)
 		}
 	})
 
 	t.Run("workspace item uses last slash", func(t *testing.T) {
-		key := groupKeyForItem("mono/packages/auth/develop", "workspace", nil)
+		key := groupKeyForItem("mono/packages/auth/develop", "workspace", nil, GroupByPackage)
 		if key != "mono/packages/auth" {
 			t.Errorf("expected 'mono/packages/auth', got %q", key)
 		}
 	})
 
 	t.Run("tmux session matching workspace prefix uses last slash", func(t *testing.T) {
-		key := groupKeyForItem("mono/packages/auth/develop", "tmux", []string{"mono"})
+		key := groupKeyForItem("mono/packages/auth/develop", "tmux", []string{"mono"}, GroupByPackage)
 		if key != "mono/packages/auth" {
 			t.Errorf("expected 'mono/packages/auth', got %q", key)
 		}
 	})
 
 	t.Run("tmux session not matching workspace prefix uses first slash", func(t *testing.T) {
-		key := groupKeyForItem("geoip/develop", "tmux", []string{"mono"})
+		key := groupKeyForItem("geoip/develop", "tmux", []string{"mono"}, GroupByPackage)
 		if key != "geoip" {
 			t.Errorf("expected 'geoip', got %q", key)
 		}
 	})
 
 	t.Run("workspace item with single slash uses first slash fallback", func(t *testing.T) {
-		key := groupKeyForItem("mono/develop", "workspace", nil)
+		key := groupKeyForItem("mono/develop", "workspace", nil, GroupByPackage)
 		if key != "mono" {
 			t.Errorf("expected 'mono', got %q", key)
 		}
@@ -959,7 +959,7 @@ func TestBuildWorktreeGroupsWorkspace(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mono/apps/portal/feature-x", Src: "workspace"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
 
 		if len(groups) != 2 {
 			t.Fatalf("expected 2 groups (one per sub-project), got %d", len(groups))
@@ -980,7 +980,7 @@ func TestBuildWorktreeGroupsWorkspace(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mono/packages/auth/feature-x", Src: "workspace"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), prefixes)
+		groups := buildWorktreeGroups(items, make(map[string]string), prefixes, GroupByPackage)
 
 		if len(groups) != 1 {
 			t.Fatalf("expected 1 group, got %d", len(groups))
@@ -1003,7 +1003,7 @@ func TestBuildWorktreeGroupsWorkspace(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mono/packages/auth/feature-x", Src: "workspace"}},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), prefixes)
+		groups := buildWorktreeGroups(items, make(map[string]string), prefixes, GroupByPackage)
 
 		if len(groups) != 2 {
 			t.Fatalf("expected 2 groups, got %d", len(groups))
@@ -1025,8 +1025,8 @@ func TestBuildDisplayItemsWorkspace(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mono/packages/auth/feature-x", Src: "workspace"}, displayName: "📦 mono/packages/auth ⎇ feature-x"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "", nil, GroupByPackage)
 
 		// sesh (tmux) + separator + mono/packages/auth[group] = 3
 		if len(display) != 3 {
@@ -1050,8 +1050,8 @@ func TestBuildDisplayItemsWorkspace(t *testing.T) {
 			sessionItem{session: model.SeshSession{Name: "mono/packages/auth/hotfix", Src: "workspace"}, displayName: "📦 mono/packages/auth ⎇ hotfix"},
 		}
 
-		groups := buildWorktreeGroups(items, make(map[string]string), nil)
-		display := buildDisplayItems(items, groups, "mono/packages/auth", nil)
+		groups := buildWorktreeGroups(items, make(map[string]string), nil, GroupByPackage)
+		display := buildDisplayItems(items, groups, "mono/packages/auth", nil, GroupByPackage)
 
 		// group header + 3 children = 4
 		if len(display) != 4 {
