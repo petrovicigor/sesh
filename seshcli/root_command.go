@@ -116,6 +116,7 @@ func NewRootCommand(version string) *cobra.Command {
 		NewPreviewCommand(previewer),
 		NewPathCommand(icon, lister),
 		NewFindByPathCommand(lister),
+		NewStatusCommand(),
 		NewTuiCommand(lister, connector, icon, tmux, config, previewer, recentTracker),
 	)
 
