@@ -50,7 +50,10 @@
       "Bash(/Users/igorpetrovic/Projects/sesh/bin/sesh list:*)",
       "Bash(/Users/igorpetrovic/projects/sesh/bin/sesh list:*)",
       "Bash(head:*)",
-      "Bash(tmux show-options:*)"
+      "Bash(tmux show-options:*)",
+      "Bash(go mod:*)",
+      "Bash(stty:*)",
+      "Bash(tmux list-keys:*)"
     ]
   }
 }
