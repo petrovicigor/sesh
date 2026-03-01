@@ -5,10 +5,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/truncate"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Cached styles to avoid per-item allocations during rendering
@@ -26,7 +26,8 @@ var (
 	treeEndStr         = treeConnStyle.Render("└")                 // Pre-rendered last connector
 	bareRootStr        = treeConnStyle.Render("(bare root)")       // Pre-rendered bare repo label
 	separatorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	attentionIconStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("🖐️") + " " // magenta hand
+	attentionIconStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("✋") + " " // magenta hand (U+270B — no VS16, correct runewidth=2)
+	savedStateDimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))                        // dim style for restorable sessions
 )
 
 // extractIconPrefix derives the ANSI icon prefix from a pre-computed displayName.
@@ -62,6 +63,7 @@ type compactDelegate struct {
 	expandedGroup    *string
 	worktreeDefaults *map[string]string
 	claudeAttention  *map[string]bool
+	savedState       *map[string]bool
 }
 
 
@@ -140,6 +142,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			}
 		}
 
+		// Dim inactive sessions with saved state to indicate they're restorable.
+		// Use raw ANSI (not lipgloss Render) to avoid nested style conflicts
+		// with selectedItemStyle wrapping in bubbletea v2.
+		if v.session.Src != "tmux" && d.savedState != nil && (*d.savedState)[sanitizeSessionName(v.session.Name)] {
+			str = str + " \033[38;5;245m⟲\033[0m"
+		}
+
 		// Add process indicator if available
 		if d.processInfo != nil {
 			if process, ok := (*d.processInfo)[v.session.Name]; ok && process == "node" {
@@ -193,7 +202,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			maxNameWidth := m.Width() - prefixWidth - badgeWidth - 1
 			nameWidth := lipgloss.Width(str)
 			if nameWidth > maxNameWidth && maxNameWidth > 3 {
-				str = truncate.StringWithTail(str, uint(maxNameWidth), "…")
+				str = ansi.Truncate(str, maxNameWidth, "…")
 				nameWidth = lipgloss.Width(str)
 			}
 			gap := m.Width() - prefixWidth - nameWidth - badgeWidth
@@ -204,6 +213,15 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	case worktreeGroupItem:
 		str = v.displayName
+		// Add restorable indicator if any session in the group has saved state
+		if d.savedState != nil {
+			for _, wt := range v.worktrees {
+				if (*d.savedState)[sanitizeSessionName(wt.session.Name)] {
+					str = str + " \033[38;5;245m⟲\033[0m"
+					break
+				}
+			}
+		}
 
 	case workspaceToggleItem:
 		check := "\033[32m[x]\033[39m" // green checkbox
@@ -246,6 +264,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		}
 	} else {
 		str = "  " + treePrefix + str + nodeIndicator
+	}
+
+	// Truncate to fit within list width — prevents overflow past border in bubbletea v2
+	if lineWidth := lipgloss.Width(str); lineWidth > m.Width() {
+		str = ansi.Truncate(str, m.Width(), "")
 	}
 
 	fmt.Fprint(w, str)

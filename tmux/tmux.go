@@ -1,7 +1,11 @@
 package tmux
 
 import (
+	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/oswrap"
@@ -68,6 +72,59 @@ func (t *RealTmux) NextWindowInSession(sessionName string) (string, error) {
 
 func (t *RealTmux) KillSession(name string) (string, error) {
 	return t.shell.Cmd("tmux", "kill-session", "-t", name)
+}
+
+// CollectPanePids enumerates all pane PIDs and their descendant process trees
+// for a tmux session. Must be called before kill-session destroys the metadata.
+func CollectPanePids(sessionName string) []int {
+	out, err := exec.Command("tmux", "list-panes", "-s", "-t", sessionName, "-F", "#{pane_pid}").Output()
+	if err != nil {
+		return nil
+	}
+
+	var allPids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || pid <= 1 {
+			continue
+		}
+		allPids = append(allPids, collectDescendants(pid)...)
+	}
+	return allPids
+}
+
+// KillProcessTrees sends SIGTERM then SIGKILL to a list of PIDs (leaf-first).
+func KillProcessTrees(pids []int) {
+	for i := len(pids) - 1; i >= 0; i-- {
+		syscall.Kill(pids[i], syscall.SIGTERM)
+	}
+	time.Sleep(50 * time.Millisecond)
+	for i := len(pids) - 1; i >= 0; i-- {
+		syscall.Kill(pids[i], syscall.SIGKILL)
+	}
+}
+
+// collectDescendants returns a PID and all its descendants (breadth-first).
+func collectDescendants(root int) []int {
+	pids := []int{root}
+	queue := []int{root}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		out, err := exec.Command("pgrep", "-P", strconv.Itoa(parent)).Output()
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			child, err := strconv.Atoi(strings.TrimSpace(line))
+			if err != nil || child <= 1 {
+				continue
+			}
+			pids = append(pids, child)
+			queue = append(queue, child)
+		}
+	}
+	return pids
 }
 
 func (t *RealTmux) IsAttached() bool {

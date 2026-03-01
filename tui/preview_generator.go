@@ -117,6 +117,7 @@ func GenerateRichPreview(sessionName string, path string, isActive bool, isGit b
 			tree := getDirectoryTree(path, isActive)
 			output.WriteString(tree)
 		}
+
 	}
 
 	return output.String()
@@ -281,6 +282,247 @@ func GenerateWorkspacePreview(sessionName string, path string, isActive bool) st
 	output.WriteString(commits)
 
 	return output.String()
+}
+
+// savedStateData holds parsed data from a tmux-session-saver JSON file.
+type savedStateData struct {
+	savedAt      string
+	windowNames  []string
+	windowCount  int
+	processCount int
+	claudeCount  int
+}
+
+// sanitizeSessionName applies the same sanitization as tmux-session-saver
+// (replaces / and spaces with _) to match saved state filenames.
+func sanitizeSessionName(name string) string {
+	r := strings.NewReplacer("/", "_", " ", "_")
+	return r.Replace(name)
+}
+
+// parseSavedState reads and parses the tmux-session-saver JSON file for a session.
+// Returns nil if no saved state exists.
+func parseSavedState(sessionName string) *savedStateData {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	filePath := filepath.Join(homeDir, ".local", "share", "tmux-session-saver", sanitizeSessionName(sessionName)+".json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil
+	}
+
+	content := string(data)
+
+	// Count windows (windows have "layout" field, panes don't)
+	windowCount := strings.Count(content, `"layout":`)
+
+	// Extract saved_at timestamp
+	savedAt := ""
+	if idx := strings.Index(content, `"saved_at": "`); idx >= 0 {
+		start := idx + len(`"saved_at": "`)
+		if end := strings.Index(content[start:], `"`); end >= 0 {
+			savedAt = content[start : start+end]
+			if tIdx := strings.Index(savedAt, "T"); tIdx >= 0 {
+				date := savedAt[:tIdx]
+				timePart := savedAt[tIdx+1:]
+				if dotIdx := strings.Index(timePart, "."); dotIdx >= 0 {
+					timePart = timePart[:dotIdx]
+				}
+				if plusIdx := strings.Index(timePart, "+"); plusIdx >= 0 {
+					timePart = timePart[:plusIdx]
+				}
+				savedAt = date + " " + timePart
+			}
+		}
+	}
+
+	// Extract window names
+	var windowNames []string
+	remaining := content
+	for {
+		idx := strings.Index(remaining, `"name": "`)
+		if idx < 0 {
+			break
+		}
+		start := idx + len(`"name": "`)
+		end := strings.Index(remaining[start:], `"`)
+		if end < 0 {
+			break
+		}
+		name := remaining[start : start+end]
+		windowNames = append(windowNames, name)
+		remaining = remaining[start+end:]
+	}
+	if len(windowNames) > windowCount {
+		windowNames = windowNames[:windowCount]
+	}
+
+	return &savedStateData{
+		savedAt:      savedAt,
+		windowNames:  windowNames,
+		windowCount:  windowCount,
+		processCount: strings.Count(content, `"long_running": true`),
+		claudeCount:  strings.Count(content, `"session_id": "`),
+	}
+}
+
+// getSavedStateInfo reads the tmux-session-saver JSON file and returns a summary string.
+// Returns empty string if no saved state exists.
+func getSavedStateInfo(sessionName string, isActive bool) string {
+	sd := parseSavedState(sessionName)
+	if sd == nil {
+		return ""
+	}
+
+	dim := colorDim
+
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("%s━━━ Saved State 💾 ━━━%s\n", dim, colorReset))
+	if sd.savedAt != "" {
+		out.WriteString(fmt.Sprintf(" %ssaved %s%s\n", dim, sd.savedAt, colorReset))
+	}
+
+	for i, name := range sd.windowNames {
+		if len(name) > 30 {
+			name = name[:27] + "..."
+		}
+		prefix := "├"
+		if i == len(sd.windowNames)-1 {
+			prefix = "└"
+		}
+		out.WriteString(fmt.Sprintf(" %s%s%s %s%s\n", dim, prefix, colorReset, name, colorReset))
+	}
+
+	if sd.processCount > 0 || sd.claudeCount > 0 {
+		var badges []string
+		if sd.processCount > 0 {
+			badges = append(badges, fmt.Sprintf("%d process", sd.processCount))
+		}
+		if sd.claudeCount > 0 {
+			badges = append(badges, fmt.Sprintf("%d claude", sd.claudeCount))
+		}
+		out.WriteString(fmt.Sprintf(" %s%s%s\n", dim, strings.Join(badges, ", "), colorReset))
+	}
+
+	return out.String()
+}
+
+// generateRestorePreview creates a full-pane preview for the restore confirmation screen.
+func generateRestorePreview(sessionName string) string {
+	sd := parseSavedState(sessionName)
+
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("\n%s━━━ Restore: %s ━━━%s\n\n", colorDim, sessionName, colorReset))
+
+	if sd == nil {
+		out.WriteString(fmt.Sprintf(" %sNo saved state found%s\n", colorDim, colorReset))
+		out.WriteString(fmt.Sprintf("\n %sEsc to go back%s\n", colorDim, colorReset))
+		return out.String()
+	}
+
+	if sd.savedAt != "" {
+		out.WriteString(fmt.Sprintf(" %sSaved: %s%s\n\n", colorDim, sd.savedAt, colorReset))
+	}
+
+	if len(sd.windowNames) > 0 {
+		out.WriteString(fmt.Sprintf(" %sWindows:%s\n", colorDim, colorReset))
+		for i, name := range sd.windowNames {
+			if len(name) > 40 {
+				name = name[:37] + "..."
+			}
+			prefix := "├"
+			if i == len(sd.windowNames)-1 {
+				prefix = "└"
+			}
+			out.WriteString(fmt.Sprintf(" %s%s%s %s%s\n", colorDim, prefix, colorReset, name, colorReset))
+		}
+		out.WriteString("\n")
+	}
+
+	if sd.processCount > 0 || sd.claudeCount > 0 {
+		var badges []string
+		if sd.processCount > 0 {
+			badges = append(badges, fmt.Sprintf("%d process(es)", sd.processCount))
+		}
+		if sd.claudeCount > 0 {
+			badges = append(badges, fmt.Sprintf("%d claude session(s)", sd.claudeCount))
+		}
+		out.WriteString(fmt.Sprintf(" %s%s%s\n\n", colorDim, strings.Join(badges, ", "), colorReset))
+	}
+
+	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s to restore  |  %s%sEsc%s%s to cancel%s\n",
+		colorReset, colorGreen, colorReset, colorDim,
+		colorReset, colorYellow, colorReset, colorDim, colorReset))
+
+	return out.String()
+}
+
+// generateSavePreview creates a compact save confirmation preview for the preview pane.
+// Shows: session name, window count, process/claude counts, last saved timestamp.
+func generateSavePreview(sessionName string, tmuxSessionNames []string) string {
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("\n%s━━━ Save: %s ━━━%s\n\n", colorDim, sessionName, colorReset))
+
+	// Get live tmux window count
+	cmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}")
+	output, _ := cmd.Output()
+	windowNames := strings.Split(strings.TrimSpace(string(output)), "\n")
+	windowCount := 0
+	if len(windowNames) > 0 && windowNames[0] != "" {
+		windowCount = len(windowNames)
+	}
+
+	out.WriteString(fmt.Sprintf(" %s%d window(s)%s\n", colorDim, windowCount, colorReset))
+
+	// Show existing saved state timestamp if available
+	sd := parseSavedState(sessionName)
+	if sd != nil && sd.savedAt != "" {
+		out.WriteString(fmt.Sprintf(" %slast saved: %s%s\n", colorDim, sd.savedAt, colorReset))
+	}
+
+	out.WriteString("\n")
+
+	// Show how many tmux sessions exist (for save-all context)
+	tmuxCount := len(tmuxSessionNames)
+	if tmuxCount > 1 {
+		out.WriteString(fmt.Sprintf(" %s%d active tmux session(s)%s\n\n", colorDim, tmuxCount, colorReset))
+	}
+
+	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s save  |  ", colorReset, colorGreen, colorReset, colorDim))
+	if tmuxCount > 1 {
+		out.WriteString(fmt.Sprintf("%s%sCtrl+A%s%s save all  |  ", colorReset, colorCyan, colorReset, colorDim))
+	}
+	out.WriteString(fmt.Sprintf("%s%sEsc%s%s cancel%s\n", colorReset, colorYellow, colorReset, colorDim, colorReset))
+
+	return out.String()
+}
+
+// generateSaveAllProgress creates a preview showing save-all progress.
+func generateSaveAllProgress(allSessions []string, completed []string) string {
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("\n%s━━━ Saving All Sessions ━━━%s\n\n", colorDim, colorReset))
+
+	completedSet := make(map[string]bool, len(completed))
+	for _, name := range completed {
+		completedSet[name] = true
+	}
+
+	firstPending := true
+	for _, name := range allSessions {
+		if completedSet[name] {
+			out.WriteString(fmt.Sprintf(" %s✓%s %s\n", colorGreen, colorReset, name))
+		} else if firstPending {
+			out.WriteString(fmt.Sprintf(" %s⏳%s %s\n", colorYellow, colorReset, name))
+			firstPending = false
+		} else {
+			out.WriteString(fmt.Sprintf("    %s%s%s\n", colorDim, name, colorReset))
+		}
+	}
+
+	out.WriteString(fmt.Sprintf("\n %s%d/%d saved%s\n", colorDim, len(completed), len(allSessions), colorReset))
+	return out.String()
 }
 
 func isGitRepo(path string) bool {

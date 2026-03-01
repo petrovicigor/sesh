@@ -3,7 +3,7 @@ package tui
 import (
 	"os"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/joshmedeski/sesh/v2/connector"
 	"github.com/joshmedeski/sesh/v2/icon"
 	"github.com/joshmedeski/sesh/v2/lister"
@@ -44,7 +44,7 @@ func NewTUI(
 	}
 }
 
-func (t *TUI) Run() (string, error) {
+func (t *TUI) Run() (string, bool, error) {
 	resetStartTime()
 	logDebug("Run() entered")
 
@@ -53,7 +53,7 @@ func (t *TUI) Run() (string, error) {
 		HideDuplicates: true,
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	logDebug("lister.List() done (%d sessions)", len(sessions.OrderedIndex))
 
@@ -72,7 +72,7 @@ func (t *TUI) Run() (string, error) {
 	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath)
 	logDebug("newModel() done")
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	logDebug("tea.NewProgram() created, calling p.Run()")
 
 	result, err := p.Run()
@@ -80,11 +80,11 @@ func (t *TUI) Run() (string, error) {
 	flushDebugLog()
 
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	finalModel, ok := result.(Model)
 	if !ok {
-		return "", nil
+		return "", false, nil
 	}
-	return finalModel.selected, nil
+	return finalModel.selected, finalModel.restoreRequested, nil
 }

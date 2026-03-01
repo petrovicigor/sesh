@@ -1,6 +1,8 @@
 package seshcli
 
 import (
+	"os/exec"
+
 	"github.com/spf13/cobra"
 
 	"github.com/joshmedeski/sesh/v2/connector"
@@ -27,7 +29,7 @@ func NewTuiCommand(
 		Short: "Interactive session picker (Bubble Tea TUI)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tuiInstance := tui.NewTUI(l, c, i, t, cfg, p, r)
-			selected, err := tuiInstance.Run()
+			selected, restoreRequested, err := tuiInstance.Run()
 			if err != nil {
 				return err
 			}
@@ -38,7 +40,20 @@ func NewTuiCommand(
 
 			// Connect to selected session
 			trimmedName := i.RemoveIcon(selected)
-			_, err = c.Connect(trimmedName, model.ConnectOpts{})
+
+			// Schedule restore BEFORE connect — Connect triggers tmux switch-client
+			// which closes the popup and kills this process. tmux run-shell -b
+			// runs in tmux's server process and survives popup closure.
+			// The delay ensures Connect has created the session first.
+			connectOpts := model.ConnectOpts{}
+			if restoreRequested {
+				// Skip startup command — restore will recreate all windows
+				connectOpts.Command = "true"
+				exec.Command("tmux", "run-shell", "-b",
+					"sleep 0.5 && tmux-session-saver restore '"+trimmedName+"'").Run()
+			}
+
+			_, err = c.Connect(trimmedName, connectOpts)
 			return err
 		},
 	}

@@ -4,10 +4,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/joshmedeski/sesh/v2/connector"
 	"github.com/joshmedeski/sesh/v2/icon"
 	"github.com/joshmedeski/sesh/v2/lister"
@@ -175,6 +175,18 @@ type Model struct {
 	workspacePrefixes []string                 // workspace config names for group key extraction
 	groupMode         GroupMode                // current workspace grouping mode (package vs branch)
 	claudeAttention   *map[string]bool         // shared with delegate: tmux session name -> needs attention
+	savedState        *map[string]bool         // shared with delegate: session name -> has saved state
+	restoreRequested       bool   // true when user wants to restore saved state after connect
+	restorePreviewMode     bool   // true when showing restore confirmation in preview pane
+	restorePreviewSession  string // session name being confirmed for restore
+	savePreviewMode        bool   // true when showing save confirmation in preview pane
+	savePreviewSession     string // session name being confirmed for save
+	saveAllSessions        []string // tmux session names being saved in save-all mode
+	saveAllCompleted       []string // sessions that finished saving in save-all mode
+	pendingDeleteFilterText  string // filter text to restore after async session kill
+	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
+	isDark                 bool   // terminal dark mode (detected via BackgroundColorMsg)
+	statusMessage          string // transient status message (auto-clears after timeout)
 
 	// Workspace manager mode
 	workspaceManagerMode bool                     // true when in workspace manager mode
@@ -239,12 +251,14 @@ func newModel(
 		sessions:         sessions,
 		width:            0,
 		height:           0,
+		isDark:           true, // default until BackgroundColorMsg arrives
 		currentFilter:    FilterAll,
 		previewContent:   "",
 		pendingPreview:   "",
 		lastPreviewKey:   "",
 		processInfo:      &map[string]string{},
 		claudeAttention:  &map[string]bool{},
+		savedState:       &map[string]bool{},
 		allItems:         items,
 		worktreeGroups:   worktreeGroups,
 		expandedGroup:    new(string),
@@ -262,7 +276,7 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention}
+	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState}
 	l := list.New(displayItems, delegate, listWidth, 24)
 	l.Title = "⚡ Sesh Sessions" // Set initial title
 	l.SetShowStatusBar(false)  // Hide item count
@@ -275,7 +289,7 @@ func newModel(
 	l.Filter = seshFilter(displayItems, frecencyScores, workspacePrefixes, GroupByPackage)
 
 	// Create preview viewport
-	vp := viewport.New(previewWidth, 24)
+	vp := viewport.New(viewport.WithWidth(previewWidth), viewport.WithHeight(24))
 	vp.SetContent("")
 
 	// Disable j/k shortcuts, keep arrow keys only
@@ -289,10 +303,8 @@ func newModel(
 	listKeys.CancelWhileFiltering.SetKeys("esc", "ctrl+c", "ctrl+b")
 	l.KeyMap = listKeys
 
-	// Customize filter styling - simple gray prompt
-	styles := list.DefaultStyles()
-	styles.FilterPrompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styles.FilterCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
+	// Customize list styling
+	styles := list.DefaultStyles(true)
 	// Make title visible with bold and color
 	styles.Title = lipgloss.NewStyle().
 		Bold(true).
@@ -324,16 +336,21 @@ func (m Model) Init() tea.Cmd {
 
 	// Enter filter mode asynchronously (allows typing to filter immediately)
 	filterCmd := func() tea.Msg {
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+		return enterFilterMsg{}
+	}
+
+	// Request terminal background color for dark/light mode detection
+	bgColorCmd := func() tea.Msg {
+		return tea.RequestBackgroundColor()
 	}
 
 	// Load preview for first item if available
 	if m.list.SelectedItem() != nil {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			logDebug("Init: queuing preview load for %q", item.session.Name)
-			return tea.Batch(filterCmd, loadPreview(m.previewer, item.session), checkClaudeAttention())
+			return tea.Batch(filterCmd, bgColorCmd, loadPreview(m.previewer, item.session), checkClaudeAttention(), checkSavedState())
 		}
 	}
 
-	return tea.Batch(filterCmd, checkClaudeAttention())
+	return tea.Batch(filterCmd, bgColorCmd, checkClaudeAttention(), checkSavedState())
 }

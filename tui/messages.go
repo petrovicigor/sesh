@@ -39,3 +39,26 @@ type ExcludesSavedMsg struct {
 type ClaudeAttentionMsg struct {
 	Sessions map[string]bool // tmux session name -> needs attention
 }
+
+type SavedStateMsg struct {
+	Sessions map[string]bool // session name -> has saved state in tmux-session-saver
+}
+
+type SessionSavedMsg struct {
+	SessionName string // session that was saved
+	Err         error  // nil on success
+}
+
+// SessionKilledMsg is sent after a tmux session has been killed (with process cleanup).
+type SessionKilledMsg struct {
+	Err error
+}
+
+// SaveAllNextMsg triggers saving the next session in a save-all batch.
+type SaveAllNextMsg struct{}
+
+// enterFilterMsg is sent to enter filter mode without fabricating a KeyMsg.
+type enterFilterMsg struct{}
+
+// clearStatusMsg is sent after a timeout to clear the status message.
+type clearStatusMsg struct{}

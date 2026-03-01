@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/joshmedeski/sesh/v2/state"
 )
 
@@ -316,6 +319,72 @@ func buildWorkspaceToggleItems(subProjects map[string][]string, excludes map[str
 	return items
 }
 
+// enterRestorePreview enters restore preview mode, showing saved state details in the preview pane.
+func (m Model) enterRestorePreview(sessionName string) (Model, tea.Cmd) {
+	m.restorePreviewMode = true
+	m.restorePreviewSession = sessionName
+	content := generateRestorePreview(sessionName)
+	m.previewContent = content
+	m.previewPort.SetContent(content)
+	m.previewPort.GotoTop()
+	return m, nil
+}
+
+// exitRestorePreview exits restore preview mode and reloads the normal preview.
+func (m Model) exitRestorePreview() (Model, tea.Cmd) {
+	m.restorePreviewMode = false
+	m.restorePreviewSession = ""
+	// Reload normal preview for currently selected item
+	if item, ok := m.list.SelectedItem().(sessionItem); ok {
+		m.previewPort.SetContent("")
+		return m, loadPreview(m.previewer, item.session)
+	}
+	m.previewPort.SetContent("")
+	m.previewContent = ""
+	return m, nil
+}
+
+// tmuxSessionNames returns the names of all active tmux sessions from allItems.
+func (m Model) tmuxSessionNames() []string {
+	var names []string
+	for _, item := range m.allItems {
+		if si, ok := item.(sessionItem); ok && si.session.Src == "tmux" {
+			names = append(names, si.session.Name)
+		}
+	}
+	return names
+}
+
+// enterSavePreview enters save preview mode, showing save confirmation in the preview pane.
+func (m Model) enterSavePreview(sessionName string) (Model, tea.Cmd) {
+	m.savePreviewMode = true
+	m.savePreviewSession = sessionName
+	m.saveAllSessions = nil
+	m.saveAllCompleted = nil
+	tmuxNames := m.tmuxSessionNames()
+	content := generateSavePreview(sessionName, tmuxNames)
+	m.previewContent = content
+	m.previewPort.SetContent(content)
+	m.previewPort.GotoTop()
+	return m, nil
+}
+
+// exitSavePreview exits save preview mode and reloads the normal preview.
+func (m Model) exitSavePreview() (Model, tea.Cmd) {
+	m.savePreviewMode = false
+	m.savePreviewSession = ""
+	m.saveAllSessions = nil
+	m.saveAllCompleted = nil
+	// Reload normal preview for currently selected item
+	if item, ok := m.list.SelectedItem().(sessionItem); ok {
+		m.previewPort.SetContent("")
+		return m, loadPreview(m.previewer, item.session)
+	}
+	m.previewPort.SetContent("")
+	m.previewContent = ""
+	return m, nil
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -333,8 +402,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		previewContentWidth := previewBoxWidth - 4
 
 		m.list.SetSize(listContentWidth, msg.Height-4)
-		m.previewPort.Width = previewContentWidth
-		m.previewPort.Height = msg.Height - 4
+		m.previewPort.SetWidth(previewContentWidth)
+		m.previewPort.SetHeight(msg.Height - 4)
 
 		// Re-set preview content (viewport handles width/truncation)
 		if m.previewContent != "" {
@@ -342,6 +411,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, nil
+
+	case tea.BackgroundColorMsg:
+		m.isDark = msg.IsDark()
+		// Rebuild list styles with correct dark/light mode
+		styles := list.DefaultStyles(m.isDark)
+		styles.Title = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("170")).
+			MarginBottom(1).
+			MarginLeft(2)
+		m.list.Styles = styles
+		return m, nil
+
+	case enterFilterMsg:
+		// Forward a '/' key press to the list so it enters filter mode
+		// through its own internal handler (focuses input, shows all items).
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+		return m, cmd
 
 	case SessionsLoadedMsg:
 		// Build new list items from loaded sessions
@@ -437,12 +525,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Re-enable filter mode
 		filterCmd := func() tea.Msg {
-			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+			return enterFilterMsg{}
 		}
 
 		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
+		// Don't let async preview overwrite the restore confirmation screen
+		if m.restorePreviewMode {
+			return m, nil
+		}
 		logDebug("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
 		m.previewContent = msg.Content
 		// Let the viewport handle width/truncation directly —
@@ -452,6 +544,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DebounceTickMsg:
+		// Don't let debounced preview overwrite the restore confirmation screen
+		if m.restorePreviewMode {
+			return m, nil
+		}
 		// Only load preview if this session is still pending
 		// (user might have moved cursor away during debounce)
 		if msg.SessionName != m.pendingPreview {
@@ -496,6 +592,106 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case SavedStateMsg:
+		// Update map in-place to preserve delegate's pointer reference
+		for k := range *m.savedState {
+			delete(*m.savedState, k)
+		}
+		for k, v := range msg.Sessions {
+			(*m.savedState)[k] = v
+		}
+		return m, nil
+
+	case SessionKilledMsg:
+		m.statusMessage = ""
+		if msg.Err != nil {
+			logDebug("DEBUG ctrl+d: kill error: %v", msg.Err)
+			return m, nil
+		}
+		*m.expandedGroup = ""
+		logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
+		return m, loadSessionsPreservingState(m.lister, m.currentFilter, m.pendingDeleteFilterText, m.pendingDeleteCursorIndex)
+
+	case SessionSavedMsg:
+		if msg.Err != nil {
+			logDebug("DEBUG: Failed to save session state for %s: %v", msg.SessionName, msg.Err)
+		} else {
+			(*m.savedState)[sanitizeSessionName(msg.SessionName)] = true
+		}
+
+		// Save-all mode: track progress and save next session
+		if m.savePreviewMode && m.saveAllSessions != nil {
+			m.saveAllCompleted = append(m.saveAllCompleted, msg.SessionName)
+			content := generateSaveAllProgress(m.saveAllSessions, m.saveAllCompleted)
+			m.previewContent = content
+			m.previewPort.SetContent(content)
+			m.previewPort.GotoTop()
+
+			// If all done, show completion and exit after delay
+			if len(m.saveAllCompleted) >= len(m.saveAllSessions) {
+				m.statusMessage = fmt.Sprintf("💾 saved %d/%d sessions", len(m.saveAllCompleted), len(m.saveAllSessions))
+				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+					return SaveAllNextMsg{} // reuse to trigger exit
+				})
+			}
+
+			// Save the next session
+			nextIdx := len(m.saveAllCompleted)
+			return m, saveSessionState(m.saveAllSessions[nextIdx])
+		}
+
+		// Single save mode: show result and exit save preview
+		if m.savePreviewMode {
+			if msg.Err != nil {
+				m.statusMessage = "save failed: " + msg.Err.Error()
+			} else {
+				m.statusMessage = "💾 saved " + msg.SessionName
+			}
+			m.savePreviewMode = false
+			m.savePreviewSession = ""
+			// Reload normal preview
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				m.previewPort.SetContent("")
+				return m, tea.Batch(
+					loadPreview(m.previewer, item.session),
+					tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
+				)
+			}
+			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+		}
+
+		// Not in save preview mode (shouldn't normally happen, but handle gracefully)
+		if msg.Err != nil {
+			m.statusMessage = "save failed: " + msg.Err.Error()
+		} else {
+			m.statusMessage = "💾 saved " + msg.SessionName
+		}
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return clearStatusMsg{}
+		})
+
+	case SaveAllNextMsg:
+		// Save-all completed — exit save preview and show status
+		if m.savePreviewMode {
+			m.savePreviewMode = false
+			m.savePreviewSession = ""
+			m.saveAllSessions = nil
+			m.saveAllCompleted = nil
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				m.previewPort.SetContent("")
+				return m, tea.Batch(
+					loadPreview(m.previewer, item.session),
+					tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
+				)
+			}
+			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
+		}
+		return m, nil
+
+	case clearStatusMsg:
+		m.statusMessage = ""
+		return m, nil
+
 	case DefaultsSavedMsg:
 		if msg.Err != nil {
 			logDebug("DEBUG: Failed to save defaults: %v", msg.Err)
@@ -508,7 +704,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
+		// Restore preview mode is fully modal — only Enter, Esc, Ctrl+C, Ctrl+B handled
+		if m.restorePreviewMode {
+			switch {
+			case key.Matches(msg, m.keys.Select): // Enter → confirm restore
+				m.selected = m.restorePreviewSession
+				m.restoreRequested = true
+				return m, tea.Quit
+			case msg.Code == tea.KeyEscape: // Esc → cancel
+				return m.exitRestorePreview()
+			case msg.String() == "ctrl+c" || msg.String() == "ctrl+b": // hard quit
+				return m, tea.Quit
+			default:
+				return m, nil // swallow all other keys
+			}
+		}
+
+		// Save preview mode is fully modal — only Enter, Ctrl+A, Esc, Ctrl+C, Ctrl+B handled
+		if m.savePreviewMode {
+			// During save-all, swallow everything (progress is automatic)
+			if m.saveAllSessions != nil {
+				switch {
+				case msg.String() == "ctrl+c" || msg.String() == "ctrl+b":
+					return m, tea.Quit
+				default:
+					return m, nil
+				}
+			}
+
+			switch {
+			case key.Matches(msg, m.keys.Select): // Enter → save selected session
+				m.statusMessage = "saving " + m.savePreviewSession + "..."
+				return m, saveSessionState(m.savePreviewSession)
+			case key.Matches(msg, m.keys.SaveAll): // Ctrl+A → save all tmux sessions
+				tmuxNames := m.tmuxSessionNames()
+				if len(tmuxNames) == 0 {
+					return m.exitSavePreview()
+				}
+				m.saveAllSessions = tmuxNames
+				m.saveAllCompleted = nil
+				content := generateSaveAllProgress(tmuxNames, nil)
+				m.previewContent = content
+				m.previewPort.SetContent(content)
+				m.previewPort.GotoTop()
+				// Start saving the first session
+				return m, saveSessionState(tmuxNames[0])
+			case msg.Code == tea.KeyEscape: // Esc → cancel
+				return m.exitSavePreview()
+			case msg.String() == "ctrl+c" || msg.String() == "ctrl+b": // hard quit
+				return m, tea.Quit
+			default:
+				return m, nil // swallow all other keys
+			}
+		}
+
 		// Handle Ctrl+E for process detection
 		if key.Matches(msg, m.keys.DetectProcesses) {
 			logDebug("DEBUG: Ctrl+E pressed, triggering process detection")
@@ -528,14 +778,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case key.Matches(msg, m.keys.Quit):
 				// Escape exits manager mode; ctrl+c/ctrl+b quit entirely
-				if msg.Type == tea.KeyEscape {
+				if msg.Code == tea.KeyEscape {
 					return m.exitWorkspaceManager()
 				}
 				return m, tea.Quit
-			case key.Matches(msg, m.keys.Select) || msg.String() == " ":
+			case key.Matches(msg, m.keys.Select) || msg.String() == "space":
 				return m.toggleWorkspaceItem()
 			}
 			// Fall through to normal key handling (up/down, typing)
+		}
+
+		// Handle Shift+Enter or Ctrl+R: show restore preview (any session with saved state)
+		if key.Matches(msg, m.keys.RestoreConnect) || key.Matches(msg, m.keys.RestoreSession) {
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				if (*m.savedState)[sanitizeSessionName(item.session.Name)] {
+					return m.enterRestorePreview(item.session.Name)
+				}
+			case worktreeGroupItem:
+				// Check if any session in the group has saved state
+				for _, wt := range item.worktrees {
+					if (*m.savedState)[sanitizeSessionName(wt.session.Name)] {
+						return m.enterRestorePreview(wt.session.Name)
+					}
+				}
+			}
+			return m, nil
+		}
+
+		// Handle Ctrl+S: enter save preview mode for tmux sessions
+		if key.Matches(msg, m.keys.SaveSession) {
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				if item.session.Src == "tmux" {
+					return m.enterSavePreview(item.session.Name)
+				}
+				// Non-tmux session — show feedback
+				m.statusMessage = "ctrl+s saves tmux sessions only"
+				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+					return clearStatusMsg{}
+				})
+			}
+			return m, nil
 		}
 
 		// Handle Tab for group expand/collapse
@@ -582,7 +865,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			// Only Escape collapses expanded group; ctrl+c/ctrl+b always quit
-			if *m.expandedGroup != "" && msg.Type == tea.KeyEscape {
+			if *m.expandedGroup != "" && msg.Code == tea.KeyEscape {
 				return m.collapseGroup()
 			}
 			return m, tea.Quit
@@ -745,15 +1028,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cursorIndex > 0 {
 						cursorIndex--
 					}
-					filterText := m.list.FilterValue()
-					logDebug("DEBUG ctrl+d: killing session=%s targetIndex=%d filterText=%q expandedGroup=%q currentFilter=%d", item.session.Name, cursorIndex, filterText, *m.expandedGroup, m.currentFilter)
-					_, err := m.tmux.KillSession(item.session.Name)
-					if err == nil {
-						*m.expandedGroup = ""
-						logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
-						return m, loadSessionsPreservingState(m.lister, m.currentFilter, filterText, cursorIndex)
-					}
-					logDebug("DEBUG ctrl+d: kill error: %v", err)
+					m.pendingDeleteFilterText = m.list.FilterValue()
+					m.pendingDeleteCursorIndex = cursorIndex
+					logDebug("DEBUG ctrl+d: killing session=%s targetIndex=%d filterText=%q expandedGroup=%q currentFilter=%d", item.session.Name, cursorIndex, m.pendingDeleteFilterText, *m.expandedGroup, m.currentFilter)
+					m.statusMessage = "killing " + item.session.Name + "..."
+					return m, killSessionWithCleanup(m.tmux, item.session.Name)
 				}
 			}
 			return m, nil

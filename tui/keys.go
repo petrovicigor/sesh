@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 type KeyMap struct {
 	Quit             key.Binding
@@ -17,6 +17,10 @@ type KeyMap struct {
 	RepoFocus         key.Binding
 	WorkspaceManager  key.Binding
 	ToggleGroupMode   key.Binding
+	RestoreConnect    key.Binding
+	RestoreSession    key.Binding
+	SaveSession       key.Binding
+	SaveAll           key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -75,5 +79,21 @@ var DefaultKeyMap = KeyMap{
 	ToggleGroupMode: key.NewBinding(
 		key.WithKeys("ctrl+g"),
 		key.WithHelp("ctrl+g", "toggle group mode"),
+	),
+	RestoreConnect: key.NewBinding(
+		key.WithKeys("shift+enter"),
+		key.WithHelp("shift+enter", "restore & connect"),
+	),
+	RestoreSession: key.NewBinding(
+		key.WithKeys("ctrl+r"),
+		key.WithHelp("ctrl+r", "restore session"),
+	),
+	SaveSession: key.NewBinding(
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "save session state"),
+	),
+	SaveAll: key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "save all tmux sessions"),
 	),
 }

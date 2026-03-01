@@ -10,7 +10,7 @@ import (
 
 // Set to true to enable debug logging to /tmp/sesh-tui-debug.log.
 // Can also be enabled at runtime via SESH_DEBUG=1 environment variable.
-const debugEnabled = false
+const debugEnabled = true
 
 var (
 	debugLog    *os.File

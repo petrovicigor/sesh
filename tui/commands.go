@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/joshmedeski/sesh/v2/claude"
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
 	"github.com/joshmedeski/sesh/v2/state"
+	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
 func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
@@ -203,6 +204,62 @@ func detectAllProcesses() tea.Cmd {
 		}
 		logDebug("DEBUG: Detected %d processes", len(processes))
 		return ProcessInfoMsg{Processes: processes}
+	}
+}
+
+// checkSavedState scans ~/.local/share/tmux-session-saver/ for .json files.
+// Returns a map of sanitized session names that have saved state available for restore.
+// Keys are sanitized (/ and spaces → _) to match tmux-session-saver's filename convention.
+func checkSavedState() tea.Cmd {
+	return func() tea.Msg {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return SavedStateMsg{Sessions: nil}
+		}
+		dir := homeDir + "/.local/share/tmux-session-saver"
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return SavedStateMsg{Sessions: nil}
+		}
+		sessions := make(map[string]bool)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if strings.HasSuffix(name, ".json") {
+				sessions[strings.TrimSuffix(name, ".json")] = true
+			}
+		}
+		return SavedStateMsg{Sessions: sessions}
+	}
+}
+
+// saveSessionState runs tmux-session-saver save for a tmux session.
+func saveSessionState(sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("tmux-session-saver", "save", sessionName)
+		err := cmd.Run()
+		return SessionSavedMsg{SessionName: sessionName, Err: err}
+	}
+}
+
+// killSessionWithCleanup collects process trees, kills the session, then cleans up orphans.
+// Runs entirely async so the TUI stays responsive.
+func killSessionWithCleanup(t tmux.Tmux, sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		// Collect pane PIDs while tmux metadata still exists
+		pids := tmux.CollectPanePids(sessionName)
+
+		// Kill the session
+		_, err := t.KillSession(sessionName)
+
+		// Clean up orphaned processes in background (SIGTERM + SIGKILL)
+		if len(pids) > 0 {
+			go tmux.KillProcessTrees(pids)
+		}
+
+		return SessionKilledMsg{Err: err}
 	}
 }
 
