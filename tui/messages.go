@@ -49,6 +49,12 @@ type SessionSavedMsg struct {
 	Err         error  // nil on success
 }
 
+// SavedStateDeletedMsg is sent after deleting a tmux-session-saver save file.
+type SavedStateDeletedMsg struct {
+	SessionName string // sanitized session name (matches savedState map key)
+	Err         error
+}
+
 // SessionKilledMsg is sent after a tmux session has been killed (with process cleanup).
 type SessionKilledMsg struct {
 	Err error

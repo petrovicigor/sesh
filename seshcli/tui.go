@@ -49,8 +49,11 @@ func NewTuiCommand(
 			if restoreRequested {
 				// Skip startup command — restore will recreate all windows
 				connectOpts.Command = "true"
+				// Restore saved state, then delete the save file on success
+				sanitized := tui.SanitizeSessionName(trimmedName)
 				exec.Command("tmux", "run-shell", "-b",
-					"sleep 0.5 && tmux-session-saver restore '"+trimmedName+"'").Run()
+					"sleep 0.5 && tmux-session-saver restore '"+trimmedName+"'"+
+						" && rm -f \"$HOME/.local/share/tmux-session-saver/"+sanitized+".json\"").Run()
 			}
 
 			_, err = c.Connect(trimmedName, connectOpts)

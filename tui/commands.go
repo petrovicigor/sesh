@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -232,6 +233,20 @@ func checkSavedState() tea.Cmd {
 			}
 		}
 		return SavedStateMsg{Sessions: sessions}
+	}
+}
+
+// deleteSavedState removes the tmux-session-saver save file for a session.
+func deleteSavedState(sessionName string) tea.Cmd {
+	sanitized := SanitizeSessionName(sessionName)
+	return func() tea.Msg {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return SavedStateDeletedMsg{SessionName: sanitized, Err: err}
+		}
+		path := filepath.Join(homeDir, ".local", "share", "tmux-session-saver", sanitized+".json")
+		err = os.Remove(path)
+		return SavedStateDeletedMsg{SessionName: sanitized, Err: err}
 	}
 }
 

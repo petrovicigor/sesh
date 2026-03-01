@@ -322,6 +322,7 @@ func buildWorkspaceToggleItems(subProjects map[string][]string, excludes map[str
 // enterRestorePreview enters restore preview mode, showing saved state details in the preview pane.
 func (m Model) enterRestorePreview(sessionName string) (Model, tea.Cmd) {
 	m.restorePreviewMode = true
+	m.deleteConfirmPending = false
 	m.restorePreviewSession = sessionName
 	content := generateRestorePreview(sessionName)
 	m.previewContent = content
@@ -333,6 +334,7 @@ func (m Model) enterRestorePreview(sessionName string) (Model, tea.Cmd) {
 // exitRestorePreview exits restore preview mode and reloads the normal preview.
 func (m Model) exitRestorePreview() (Model, tea.Cmd) {
 	m.restorePreviewMode = false
+	m.deleteConfirmPending = false
 	m.restorePreviewSession = ""
 	// Reload normal preview for currently selected item
 	if item, ok := m.list.SelectedItem().(sessionItem); ok {
@@ -612,6 +614,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
 		return m, loadSessionsPreservingState(m.lister, m.currentFilter, m.pendingDeleteFilterText, m.pendingDeleteCursorIndex)
 
+	case SavedStateDeletedMsg:
+		if msg.Err != nil {
+			logDebug("DEBUG: Failed to delete saved state for %s: %v", msg.SessionName, msg.Err)
+		} else {
+			delete(*m.savedState, msg.SessionName)
+		}
+		// Exit restore preview since the saved state is gone
+		if m.restorePreviewMode {
+			return m.exitRestorePreview()
+		}
+		return m, nil
+
 	case SessionSavedMsg:
 		if msg.Err != nil {
 			logDebug("DEBUG: Failed to save session state for %s: %v", msg.SessionName, msg.Err)
@@ -712,7 +726,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected = m.restorePreviewSession
 				m.restoreRequested = true
 				return m, tea.Quit
+			case msg.Code == tea.KeyBackspace: // Backspace → delete saved state
+				if m.deleteConfirmPending {
+					m.deleteConfirmPending = false
+					return m, deleteSavedState(m.restorePreviewSession)
+				}
+				// First press — show confirmation in preview
+				m.deleteConfirmPending = true
+				content := generateDeleteConfirmPreview(m.restorePreviewSession)
+				m.previewContent = content
+				m.previewPort.SetContent(content)
+				m.previewPort.GotoTop()
+				return m, nil
 			case msg.Code == tea.KeyEscape: // Esc → cancel
+				m.deleteConfirmPending = false
 				return m.exitRestorePreview()
 			case msg.String() == "ctrl+c" || msg.String() == "ctrl+b": // hard quit
 				return m, tea.Quit

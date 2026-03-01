@@ -179,6 +179,7 @@ type Model struct {
 	restoreRequested       bool   // true when user wants to restore saved state after connect
 	restorePreviewMode     bool   // true when showing restore confirmation in preview pane
 	restorePreviewSession  string // session name being confirmed for restore
+	deleteConfirmPending   bool   // true when waiting for second Backspace to confirm delete
 	savePreviewMode        bool   // true when showing save confirmation in preview pane
 	savePreviewSession     string // session name being confirmed for save
 	saveAllSessions        []string // tmux session names being saved in save-all mode
