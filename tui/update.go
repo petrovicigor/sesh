@@ -616,7 +616,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			logDebug("DEBUG: Failed to save session state for %s: %v", msg.SessionName, msg.Err)
 		} else {
-			(*m.savedState)[sanitizeSessionName(msg.SessionName)] = true
+			(*m.savedState)[SanitizeSessionName(msg.SessionName)] = true
 		}
 
 		// Save-all mode: track progress and save next session
@@ -792,13 +792,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, m.keys.RestoreConnect) || key.Matches(msg, m.keys.RestoreSession) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
-				if (*m.savedState)[sanitizeSessionName(item.session.Name)] {
+				if (*m.savedState)[SanitizeSessionName(item.session.Name)] {
 					return m.enterRestorePreview(item.session.Name)
 				}
 			case worktreeGroupItem:
 				// Check if any session in the group has saved state
 				for _, wt := range item.worktrees {
-					if (*m.savedState)[sanitizeSessionName(wt.session.Name)] {
+					if (*m.savedState)[SanitizeSessionName(wt.session.Name)] {
 						return m.enterRestorePreview(wt.session.Name)
 					}
 				}

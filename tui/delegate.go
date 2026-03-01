@@ -142,10 +142,10 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			}
 		}
 
-		// Dim inactive sessions with saved state to indicate they're restorable.
+		// Show restorable indicator for sessions with saved state.
 		// Use raw ANSI (not lipgloss Render) to avoid nested style conflicts
 		// with selectedItemStyle wrapping in bubbletea v2.
-		if v.session.Src != "tmux" && d.savedState != nil && (*d.savedState)[sanitizeSessionName(v.session.Name)] {
+		if d.savedState != nil && (*d.savedState)[SanitizeSessionName(v.session.Name)] {
 			str = str + " \033[38;5;245m⟲\033[0m"
 		}
 
@@ -216,7 +216,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		// Add restorable indicator if any session in the group has saved state
 		if d.savedState != nil {
 			for _, wt := range v.worktrees {
-				if (*d.savedState)[sanitizeSessionName(wt.session.Name)] {
+				if (*d.savedState)[SanitizeSessionName(wt.session.Name)] {
 					str = str + " \033[38;5;245m⟲\033[0m"
 					break
 				}

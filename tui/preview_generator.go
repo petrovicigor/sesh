@@ -293,9 +293,9 @@ type savedStateData struct {
 	claudeCount  int
 }
 
-// sanitizeSessionName applies the same sanitization as tmux-session-saver
+// SanitizeSessionName applies the same sanitization as tmux-session-saver
 // (replaces / and spaces with _) to match saved state filenames.
-func sanitizeSessionName(name string) string {
+func SanitizeSessionName(name string) string {
 	r := strings.NewReplacer("/", "_", " ", "_")
 	return r.Replace(name)
 }
@@ -307,7 +307,7 @@ func parseSavedState(sessionName string) *savedStateData {
 	if err != nil {
 		return nil
 	}
-	filePath := filepath.Join(homeDir, ".local", "share", "tmux-session-saver", sanitizeSessionName(sessionName)+".json")
+	filePath := filepath.Join(homeDir, ".local", "share", "tmux-session-saver", SanitizeSessionName(sessionName)+".json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil
@@ -452,10 +452,22 @@ func generateRestorePreview(sessionName string) string {
 		out.WriteString(fmt.Sprintf(" %s%s%s\n\n", colorDim, strings.Join(badges, ", "), colorReset))
 	}
 
-	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s to restore  |  %s%sEsc%s%s to cancel%s\n",
+	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s restore  |  %s%sBksp%s%s delete  |  %s%sEsc%s%s cancel%s\n",
 		colorReset, colorGreen, colorReset, colorDim,
+		colorReset, colorRed, colorReset, colorDim,
 		colorReset, colorYellow, colorReset, colorDim, colorReset))
 
+	return out.String()
+}
+
+// generateDeleteConfirmPreview shows a confirmation prompt before deleting saved state.
+func generateDeleteConfirmPreview(sessionName string) string {
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("\n%s━━━ Delete saved state: %s ━━━%s\n\n", colorDim, sessionName, colorReset))
+	out.WriteString(fmt.Sprintf(" %sPress %s%sBksp%s%s again to confirm  |  %s%sEsc%s%s cancel%s\n",
+		colorDim,
+		colorReset, colorRed, colorReset, colorDim,
+		colorReset, colorYellow, colorReset, colorDim, colorReset))
 	return out.String()
 }
 
@@ -465,38 +477,52 @@ func generateSavePreview(sessionName string, tmuxSessionNames []string) string {
 	var out strings.Builder
 	out.WriteString(fmt.Sprintf("\n%s━━━ Save: %s ━━━%s\n\n", colorDim, sessionName, colorReset))
 
-	// Get live tmux window count
-	cmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}")
-	output, _ := cmd.Output()
-	windowNames := strings.Split(strings.TrimSpace(string(output)), "\n")
-	windowCount := 0
-	if len(windowNames) > 0 && windowNames[0] != "" {
-		windowCount = len(windowNames)
-	}
-
-	out.WriteString(fmt.Sprintf(" %s%d window(s)%s\n", colorDim, windowCount, colorReset))
-
 	// Show existing saved state timestamp if available
 	sd := parseSavedState(sessionName)
 	if sd != nil && sd.savedAt != "" {
-		out.WriteString(fmt.Sprintf(" %slast saved: %s%s\n", colorDim, sd.savedAt, colorReset))
+		out.WriteString(fmt.Sprintf(" %sLast saved: %s%s\n\n", colorDim, sd.savedAt, colorReset))
 	}
 
-	out.WriteString("\n")
+	// Get live tmux windows for the selected session
+	windowNames := getTmuxWindowNames(sessionName)
+	if len(windowNames) > 0 {
+		out.WriteString(fmt.Sprintf(" %sWindows:%s\n", colorDim, colorReset))
+		for i, name := range windowNames {
+			if len(name) > 40 {
+				name = name[:37] + "..."
+			}
+			prefix := "├"
+			if i == len(windowNames)-1 {
+				prefix = "└"
+			}
+			out.WriteString(fmt.Sprintf(" %s%s%s %s%s\n", colorDim, prefix, colorReset, name, colorReset))
+		}
+		out.WriteString("\n")
+	}
 
-	// Show how many tmux sessions exist (for save-all context)
+	// Footer with actions
 	tmuxCount := len(tmuxSessionNames)
-	if tmuxCount > 1 {
-		out.WriteString(fmt.Sprintf(" %s%d active tmux session(s)%s\n\n", colorDim, tmuxCount, colorReset))
-	}
-
 	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s save  |  ", colorReset, colorGreen, colorReset, colorDim))
 	if tmuxCount > 1 {
-		out.WriteString(fmt.Sprintf("%s%sCtrl+A%s%s save all  |  ", colorReset, colorCyan, colorReset, colorDim))
+		out.WriteString(fmt.Sprintf("%s%sCtrl+A%s%s save all (%d)  |  ", colorReset, colorCyan, colorReset, colorDim, tmuxCount))
 	}
 	out.WriteString(fmt.Sprintf("%s%sEsc%s%s cancel%s\n", colorReset, colorYellow, colorReset, colorDim, colorReset))
 
 	return out.String()
+}
+
+// getTmuxWindowNames returns window names for a live tmux session.
+func getTmuxWindowNames(sessionName string) []string {
+	cmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	raw := strings.TrimSpace(string(output))
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "\n")
 }
 
 // generateSaveAllProgress creates a preview showing save-all progress.
@@ -511,13 +537,16 @@ func generateSaveAllProgress(allSessions []string, completed []string) string {
 
 	firstPending := true
 	for _, name := range allSessions {
+		windowCount := len(getTmuxWindowNames(name))
+		suffix := fmt.Sprintf(" %s(%d windows)%s", colorDim, windowCount, colorReset)
+
 		if completedSet[name] {
-			out.WriteString(fmt.Sprintf(" %s✓%s %s\n", colorGreen, colorReset, name))
+			out.WriteString(fmt.Sprintf(" %s✓%s %s%s\n", colorGreen, colorReset, name, suffix))
 		} else if firstPending {
-			out.WriteString(fmt.Sprintf(" %s⏳%s %s\n", colorYellow, colorReset, name))
+			out.WriteString(fmt.Sprintf(" %s⏳%s %s%s\n", colorYellow, colorReset, name, suffix))
 			firstPending = false
 		} else {
-			out.WriteString(fmt.Sprintf("    %s%s%s\n", colorDim, name, colorReset))
+			out.WriteString(fmt.Sprintf("    %s%s%s%s\n", colorDim, name, colorReset, suffix))
 		}
 	}
 
