@@ -218,9 +218,10 @@ func newModel(
 			if session, ok := sessions.Directory[key]; ok {
 				displayName := icon.AddIcon(session)
 				items = append(items, sessionItem{
-					session:     session,
-					displayName: displayName,
-					iconPrefix:  extractIconPrefix(displayName, session.Name),
+					session:       session,
+					displayName:   displayName,
+					iconPrefix:    extractIconPrefix(displayName, session.Name),
+					sanitizedName: SanitizeSessionName(session.Name),
 				})
 			}
 		}

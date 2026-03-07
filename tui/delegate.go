@@ -13,21 +13,28 @@ import (
 
 // Cached styles to avoid per-item allocations during rendering
 var (
-	nodeIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	selectedItemStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
-	defaultStarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	treeConnStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	nodeIndicatorStr   = nodeIndicatorStyle.Render(" ⬢")           // Pre-rendered
-	filterDimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("242")) // Dim unmatched chars
-	badgeStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // Dim source badge
-	dimRepoStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))            // Dim repo prefix in filtered worktrees
-	defaultStarStr     = defaultStarStyle.Render("★")              // Pre-rendered gold star
-	treeMidStr         = treeConnStyle.Render("│")                 // Pre-rendered connector
-	treeEndStr         = treeConnStyle.Render("└")                 // Pre-rendered last connector
-	bareRootStr        = treeConnStyle.Render("(bare root)")       // Pre-rendered bare repo label
+	filterDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	dimRepoStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	badgeStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	separatorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	attentionIconStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("✋") + " " // magenta hand (U+270B — no VS16, correct runewidth=2)
-	savedStateDimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))                        // dim style for restorable sessions
+
+	// Pre-rendered strings (computed once at init, never re-rendered)
+	nodeIndicatorStr = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(" ⬢")
+	defaultStarStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("★")
+	treeMidStr       = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("│")
+	treeEndStr       = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("└")
+	bareRootStr      = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(bare root)")
+	attentionIconStr = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("✋") + " "
+
+	// Pre-rendered source badges for filtered view (avoids per-item lipgloss.Render)
+	sourceBadges = map[string]string{
+		"tmux":       badgeStyle.Render("tmux"),
+		"zoxide":     badgeStyle.Render("zoxide"),
+		"config":     badgeStyle.Render("config"),
+		"projects":   badgeStyle.Render("projects"),
+		"tmuxinator": badgeStyle.Render("tmuxinator"),
+	}
 )
 
 // extractIconPrefix derives the ANSI icon prefix from a pre-computed displayName.
@@ -77,7 +84,10 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	var str string
 	var nodeIndicator string
 	isFiltered := m.FilterState() == list.Filtering && m.FilterValue() != ""
-	matchedRunes := m.MatchesForItem(index)
+	var matchedRunes []int
+	if isFiltered {
+		matchedRunes = m.MatchesForItem(index)
+	}
 
 	switch v := item.(type) {
 	case sessionItem:
@@ -145,7 +155,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		// Show restorable indicator for sessions with saved state.
 		// Use raw ANSI (not lipgloss Render) to avoid nested style conflicts
 		// with selectedItemStyle wrapping in bubbletea v2.
-		if d.savedState != nil && (*d.savedState)[SanitizeSessionName(v.session.Name)] {
+		if d.savedState != nil && (*d.savedState)[v.sanitizedName] {
 			str = str + " \033[38;5;245m⟲\033[0m"
 		}
 
@@ -196,7 +206,10 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 		// Show source badge during active filtering, truncating long names to fit
 		if isFiltered && len(matchedRunes) > 0 {
-			badge := badgeStyle.Render(v.session.Src)
+			badge := sourceBadges[v.session.Src]
+			if badge == "" {
+				badge = badgeStyle.Render(v.session.Src) // fallback for unknown sources
+			}
 			badgeWidth := lipgloss.Width(badge)
 			prefixWidth := 2 // "❯ " or "  "
 			maxNameWidth := m.Width() - prefixWidth - badgeWidth - 1
@@ -216,7 +229,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		// Add restorable indicator if any session in the group has saved state
 		if d.savedState != nil {
 			for _, wt := range v.worktrees {
-				if (*d.savedState)[SanitizeSessionName(wt.session.Name)] {
+				if (*d.savedState)[wt.sanitizedName] {
 					str = str + " \033[38;5;245m⟲\033[0m"
 					break
 				}
@@ -266,9 +279,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		str = "  " + treePrefix + str + nodeIndicator
 	}
 
-	// Truncate to fit within list width — prevents overflow past border in bubbletea v2
-	if lineWidth := lipgloss.Width(str); lineWidth > m.Width() {
-		str = ansi.Truncate(str, m.Width(), "")
+	// Truncate to fit within list width — prevents overflow past border in bubbletea v2.
+	// Fast path: if raw byte length fits, visual width must also fit
+	// (ANSI escapes have zero visual width but nonzero byte length).
+	if len(str) > m.Width() {
+		if lineWidth := lipgloss.Width(str); lineWidth > m.Width() {
+			str = ansi.Truncate(str, m.Width(), "")
+		}
 	}
 
 	fmt.Fprint(w, str)

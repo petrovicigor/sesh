@@ -441,9 +441,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if session, ok := msg.Sessions.Directory[key]; ok {
 					displayName := m.icon.AddIcon(session)
 					items = append(items, sessionItem{
-						session:     session,
-						displayName: displayName,
-						iconPrefix:  extractIconPrefix(displayName, session.Name),
+						session:       session,
+						displayName:   displayName,
+						iconPrefix:    extractIconPrefix(displayName, session.Name),
+						sanitizedName: SanitizeSessionName(session.Name),
 					})
 				}
 			}
@@ -556,13 +557,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Find the session and load its preview
-		for _, key := range m.sessions.OrderedIndex {
-			session := m.sessions.Directory[key]
-			if session.Name == msg.SessionName {
-				m.lastPreviewKey = session.Name
-				m.pendingPreview = ""
-				return m, loadPreview(m.previewer, session)
+		// Use the currently selected item (debounce already verified it matches)
+		m.pendingPreview = ""
+		switch item := m.list.SelectedItem().(type) {
+		case sessionItem:
+			if item.session.Name == msg.SessionName {
+				m.lastPreviewKey = item.session.Name
+				return m, loadPreview(m.previewer, item.session)
+			}
+		case worktreeGroupItem:
+			if rep, ok := representativeSession(item); ok && rep.session.Name == msg.SessionName {
+				m.lastPreviewKey = rep.session.Name
+				return m, loadPreview(m.previewer, rep.session)
 			}
 		}
 		return m, nil
@@ -819,13 +825,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, m.keys.RestoreConnect) || key.Matches(msg, m.keys.RestoreSession) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
-				if (*m.savedState)[SanitizeSessionName(item.session.Name)] {
+				if (*m.savedState)[item.sanitizedName] {
 					return m.enterRestorePreview(item.session.Name)
 				}
 			case worktreeGroupItem:
 				// Check if any session in the group has saved state
 				for _, wt := range item.worktrees {
-					if (*m.savedState)[SanitizeSessionName(wt.session.Name)] {
+					if (*m.savedState)[wt.sanitizedName] {
 						return m.enterRestorePreview(wt.session.Name)
 					}
 				}

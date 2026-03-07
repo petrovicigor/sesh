@@ -7,6 +7,7 @@ type sessionItem struct {
 	session        model.SeshSession
 	displayName    string // Pre-computed with icon and ⎇ formatting
 	iconPrefix     string // Just the ANSI icon prefix (e.g., "\033[34m\033[39m ")
+	sanitizedName  string // Pre-computed SanitizeSessionName(session.Name) for savedState lookups
 	groupBadge     string // Dormant count badge (e.g., "\033[240m(+2)\033[39m") — set on last active tmux in group
 	groupRepo      string // Repo name if this item carries expand/collapse for a group
 	groupChild     bool   // True if this is an expanded child of a worktree group

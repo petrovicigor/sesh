@@ -293,11 +293,13 @@ type savedStateData struct {
 	claudeCount  int
 }
 
+// sanitizeReplacer is shared across all SanitizeSessionName calls to avoid per-call allocation.
+var sanitizeReplacer = strings.NewReplacer("/", "_", " ", "_")
+
 // SanitizeSessionName applies the same sanitization as tmux-session-saver
 // (replaces / and spaces with _) to match saved state filenames.
 func SanitizeSessionName(name string) string {
-	r := strings.NewReplacer("/", "_", " ", "_")
-	return r.Replace(name)
+	return sanitizeReplacer.Replace(name)
 }
 
 // parseSavedState reads and parses the tmux-session-saver JSON file for a session.
