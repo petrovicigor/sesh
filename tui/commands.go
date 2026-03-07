@@ -259,10 +259,13 @@ func saveSessionState(sessionName string) tea.Cmd {
 	}
 }
 
-// killSessionWithCleanup collects process trees, kills the session, then cleans up orphans.
+// killSessionWithCleanup gracefully cleans up panes, kills the session, then cleans up orphans.
 // Runs entirely async so the TUI stays responsive.
 func killSessionWithCleanup(t tmux.Tmux, sessionName string) tea.Cmd {
 	return func() tea.Msg {
+		// Graceful cleanup: notify claude-sessions + send :qa! to neovim panes
+		tmux.GracefulPaneCleanup(sessionName)
+
 		// Collect pane PIDs while tmux metadata still exists
 		pids := tmux.CollectPanePids(sessionName)
 

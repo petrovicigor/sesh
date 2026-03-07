@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -72,6 +73,54 @@ func (t *RealTmux) NextWindowInSession(sessionName string) (string, error) {
 
 func (t *RealTmux) KillSession(name string) (string, error) {
 	return t.shell.Cmd("tmux", "kill-session", "-t", name)
+}
+
+// GracefulPaneCleanup performs pre-kill cleanup for all panes in a session:
+// - Notifies claude-sessions about pane exits (fire-and-forget)
+// - Sends :qa! to neovim/vim panes for clean VimLeave autocmd shutdown
+// Must be called before KillSession while tmux metadata still exists.
+func GracefulPaneCleanup(sessionName string) {
+	out, err := exec.Command("tmux", "list-panes", "-s", "-t", sessionName,
+		"-F", "#{pane_id}\t#{pane_current_command}").Output()
+	if err != nil {
+		return
+	}
+
+	var wg sync.WaitGroup
+	var hasNvim bool
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		paneID := parts[0]
+		paneCmd := strings.TrimSpace(parts[1])
+
+		// Notify claude-sessions (parallel, but wait before session kill)
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			exec.Command("claude-sessions", "pane-exited", id).Run()
+		}(paneID)
+
+		// Send :qa! to neovim for graceful shutdown
+		if paneCmd == "nvim" || paneCmd == "vim" {
+			exec.Command("tmux", "send-keys", "-t", paneID, "Escape", ":qa!", "Enter").Run()
+			hasNvim = true
+		}
+	}
+
+	// Wait for claude-sessions notifications to finish (with timeout)
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	timeout := 50 * time.Millisecond
+	if hasNvim {
+		timeout = 100 * time.Millisecond
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
 }
 
 // CollectPanePids enumerates all pane PIDs and their descendant process trees
