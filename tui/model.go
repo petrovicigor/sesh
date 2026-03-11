@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"slices"
 	"strings"
 
@@ -162,7 +163,6 @@ type Model struct {
 	keys             KeyMap
 	lastFilter       string            // Track last filter text to detect changes
 	previewContent   string            // Current preview text
-	pendingPreview   string            // Session name waiting for debounce
 	lastPreviewKey   string            // Last session name that had preview loaded
 	processInfo      *map[string]string       // shared with delegate (heap-allocated)
 	allItems         []list.Item              // Full item list (no groups, used for filter mode)
@@ -184,10 +184,15 @@ type Model struct {
 	savePreviewSession     string // session name being confirmed for save
 	saveAllSessions        []string // tmux session names being saved in save-all mode
 	saveAllCompleted       []string // sessions that finished saving in save-all mode
+	restoreAllSessions       []string // sessions being restored in restore-all mode
+	restoreAllCompleted      []string // sessions that finished restoring in restore-all mode
+	restoreAllCurrentSession string   // current tmux session name (restored last via quit flow)
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
 	isDark                 bool   // terminal dark mode (detected via BackgroundColorMsg)
 	statusMessage          string // transient status message (auto-clears after timeout)
+
+	previewCancel        context.CancelFunc       // cancels the in-flight preview load goroutine
 
 	// Workspace manager mode
 	workspaceManagerMode bool                     // true when in workspace manager mode
@@ -256,7 +261,6 @@ func newModel(
 		isDark:           true, // default until BackgroundColorMsg arrives
 		currentFilter:    FilterAll,
 		previewContent:   "",
-		pendingPreview:   "",
 		lastPreviewKey:   "",
 		processInfo:      &map[string]string{},
 		claudeAttention:  &map[string]bool{},
@@ -350,9 +354,9 @@ func (m Model) Init() tea.Cmd {
 	if m.list.SelectedItem() != nil {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			logDebug("Init: queuing preview load for %q", item.session.Name)
-			return tea.Batch(filterCmd, bgColorCmd, loadPreview(m.previewer, item.session), checkClaudeAttention(), checkSavedState())
+			return tea.Batch(filterCmd, bgColorCmd, loadPreview(context.Background(), m.previewer, item.session), checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState())
 		}
 	}
 
-	return tea.Batch(filterCmd, bgColorCmd, checkClaudeAttention(), checkSavedState())
+	return tea.Batch(filterCmd, bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState())
 }
