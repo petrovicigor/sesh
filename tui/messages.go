@@ -20,10 +20,6 @@ type PreviewLoadedMsg struct {
 	Content string
 }
 
-type DebounceTickMsg struct {
-	SessionName string
-}
-
 type ProcessInfoMsg struct {
 	Processes map[string]string // session name -> process type ("node", etc)
 }
@@ -63,8 +59,21 @@ type SessionKilledMsg struct {
 // SaveAllNextMsg triggers saving the next session in a save-all batch.
 type SaveAllNextMsg struct{}
 
+// SessionRestoredMsg is sent after tmux-session-saver restore completes for one session.
+type SessionRestoredMsg struct {
+	SessionName string
+	Err         error
+}
+
+// RestoreAllNextMsg triggers restoring the next session in a restore-all batch,
+// or exits to restore the current session.
+type RestoreAllNextMsg struct{}
+
 // enterFilterMsg is sent to enter filter mode without fabricating a KeyMsg.
 type enterFilterMsg struct{}
 
 // clearStatusMsg is sent after a timeout to clear the status message.
 type clearStatusMsg struct{}
+
+// claudeAttentionTickMsg triggers a periodic re-check of Claude attention status.
+type claudeAttentionTickMsg struct{}
