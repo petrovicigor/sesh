@@ -53,7 +53,11 @@ func (m Model) View() tea.View {
 
 	// Add status message below columns if present
 	if m.restorePreviewMode {
-		columns += "\n " + statusMsgStyle.Render("Enter to restore | Esc to cancel")
+		if m.restoreAllSessions != nil {
+			columns += "\n " + statusMsgStyle.Render("restoring all sessions...")
+		} else {
+			columns += "\n " + statusMsgStyle.Render("Enter restore | Ctrl+A restore all | Esc cancel")
+		}
 	} else if m.savePreviewMode {
 		if m.saveAllSessions != nil {
 			columns += "\n " + statusMsgStyle.Render("saving all sessions...")

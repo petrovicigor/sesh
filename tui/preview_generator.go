@@ -294,7 +294,7 @@ func getSavedStateInfo(sessionName string, isActive bool) string {
 }
 
 // generateRestorePreview creates a full-pane preview for the restore confirmation screen.
-func generateRestorePreview(sessionName string) string {
+func generateRestorePreview(sessionName string, savedCount int) string {
 	sd := parseSavedState(sessionName)
 
 	var out strings.Builder
@@ -336,8 +336,11 @@ func generateRestorePreview(sessionName string) string {
 		out.WriteString(fmt.Sprintf(" %s%s%s\n\n", colorDim, strings.Join(badges, ", "), colorReset))
 	}
 
-	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s restore  |  %s%sBksp%s%s delete  |  %s%sEsc%s%s cancel%s\n",
-		colorReset, colorGreen, colorReset, colorDim,
+	out.WriteString(fmt.Sprintf(" %s%sEnter%s%s restore  |  ", colorReset, colorGreen, colorReset, colorDim))
+	if savedCount > 1 {
+		out.WriteString(fmt.Sprintf("%s%sCtrl+A%s%s restore all (%d)  |  ", colorReset, colorCyan, colorReset, colorDim, savedCount))
+	}
+	out.WriteString(fmt.Sprintf("%s%sBksp%s%s delete  |  %s%sEsc%s%s cancel%s\n",
 		colorReset, colorRed, colorReset, colorDim,
 		colorReset, colorYellow, colorReset, colorDim, colorReset))
 
@@ -435,6 +438,57 @@ func generateSaveAllProgress(allSessions []string, completed []string) string {
 	}
 
 	out.WriteString(fmt.Sprintf("\n %s%d/%d saved%s\n", colorDim, len(completed), len(allSessions), colorReset))
+	return out.String()
+}
+
+// generateRestoreAllProgress creates a preview showing restore-all progress.
+func generateRestoreAllProgress(allSessions []string, completed []string, currentSession string) string {
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("\n%s━━━ Restoring All Sessions ━━━%s\n\n", colorDim, colorReset))
+
+	completedSet := make(map[string]bool, len(completed))
+	for _, name := range completed {
+		completedSet[name] = true
+	}
+
+	firstPending := true
+	for _, name := range allSessions {
+		if name == currentSession {
+			out.WriteString(fmt.Sprintf(" %s★%s %s %s(restore on exit)%s\n", colorMagenta, colorReset, name, colorDim, colorReset))
+			continue
+		}
+
+		sd := parseSavedState(name)
+		suffix := ""
+		if sd != nil {
+			suffix = fmt.Sprintf(" %s(%d windows)%s", colorDim, sd.windowCount, colorReset)
+		}
+
+		if completedSet[name] {
+			out.WriteString(fmt.Sprintf(" %s✓%s %s%s\n", colorGreen, colorReset, name, suffix))
+		} else if firstPending {
+			out.WriteString(fmt.Sprintf(" %s⏳%s %s%s\n", colorYellow, colorReset, name, suffix))
+			firstPending = false
+		} else {
+			out.WriteString(fmt.Sprintf("    %s%s%s%s\n", colorDim, name, colorReset, suffix))
+		}
+	}
+
+	// Count non-current sessions for progress
+	total := 0
+	done := 0
+	for _, name := range allSessions {
+		if name != currentSession {
+			total++
+		}
+	}
+	for _, name := range completed {
+		if name != currentSession {
+			done++
+		}
+	}
+
+	out.WriteString(fmt.Sprintf("\n %s%d/%d restored%s\n", colorDim, done, total, colorReset))
 	return out.String()
 }
 
