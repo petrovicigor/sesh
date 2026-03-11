@@ -21,6 +21,7 @@ type KeyMap struct {
 	RestoreSession    key.Binding
 	SaveSession       key.Binding
 	SaveAll           key.Binding
+	RestoreAll        key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -95,5 +96,9 @@ var DefaultKeyMap = KeyMap{
 	SaveAll: key.NewBinding(
 		key.WithKeys("ctrl+a"),
 		key.WithHelp("ctrl+a", "save all tmux sessions"),
+	),
+	RestoreAll: key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "restore all sessions"),
 	),
 }
