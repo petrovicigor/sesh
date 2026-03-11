@@ -1,14 +1,16 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/joshmedeski/sesh/v2/claude"
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
@@ -72,73 +74,84 @@ func loadSessionsPreservingState(l lister.Lister, filter FilterType, filterText 
 	}
 }
 
-func loadPreview(p previewer.Previewer, session model.SeshSession) tea.Cmd {
+func loadPreview(ctx context.Context, p previewer.Previewer, session model.SeshSession) tea.Cmd {
 	return func() tea.Msg {
 		logDebug("loadPreview: starting for %q (src=%s, path=%s)", session.Name, session.Src, session.Path)
 		isActive := (session.Src == "tmux")
 		path := session.Path
 
-		// Check git status once (avoid double stat)
-		isGit := path != "" && isGitRepo(path)
+		// No path → fallback previewer
+		if path == "" {
+			content, err := p.Preview(session.Name)
+			if err != nil {
+				return PreviewLoadedMsg{Content: "Error loading preview: " + err.Error()}
+			}
+			if content == "" {
+				return PreviewLoadedMsg{Content: "No preview available"}
+			}
+			return PreviewLoadedMsg{Content: content}
+		}
 
-		// For workspace sub-projects (path inside a git repo but not at root),
-		// show filtered git preview regardless of active/inactive state.
-		isSubdirGit := !isGit && path != "" && isInsideGitWorkTree(path)
-		logDebug("loadPreview: isGit=%v, isSubdirGit=%v, path=%q", isGit, isSubdirGit, path)
+		// Check cancellation before expensive git operations
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		// Detect git status
+		isGit := isGitRepo(path)
+		isSubdirGit := !isGit && isInsideGitWorkTree(path)
+
+		if ctx.Err() != nil {
+			return nil
+		}
+
 		if isSubdirGit {
-			logDebug("loadPreview: workspace sub-project detected, generating filtered preview")
-			content := GenerateWorkspacePreview(session.Name, path, isActive)
+			var wg sync.WaitGroup
+			var data *workspaceGitData
+			var claudeSessions string
+			wg.Add(2)
+			go func() { defer wg.Done(); data = fetchWorkspaceGitData(ctx, path, isActive) }()
+			go func() { defer wg.Done(); claudeSessions = getClaudeSessions(path, session.Name, isActive) }()
+			wg.Wait()
+			if ctx.Err() != nil {
+				return nil
+			}
+			content := composeWorkspacePreviewFromCache(session.Name, isActive, data, claudeSessions)
 			return PreviewLoadedMsg{Content: content}
 		}
 
-		// For active tmux sessions in git repos, show git info
-		if isActive && isGit {
-			logDebug("loadPreview: active tmux git repo path")
-			content := GenerateRichPreview(session.Name, path, isActive, true)
-			logDebug("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
+		if isGit {
+			var wg sync.WaitGroup
+			var data *gitData
+			var claudeSessions string
+			wg.Add(2)
+			go func() { defer wg.Done(); data = fetchGitData(ctx, path, isActive) }()
+			go func() { defer wg.Done(); claudeSessions = getClaudeSessions(path, session.Name, isActive) }()
+			wg.Wait()
+			if ctx.Err() != nil {
+				return nil
+			}
+			content := composeGitPreview(session.Name, isActive, data, claudeSessions)
 			return PreviewLoadedMsg{Content: content}
 		}
 
-		// For active tmux sessions NOT in git repos, capture pane content
+		// Active non-git: try pane capture
 		if isActive {
-			logDebug("loadPreview: active tmux non-git, trying pane capture")
 			content, err := p.Preview(session.Name)
 			if err == nil && content != "" {
-				logDebug("loadPreview: pane capture done (%d bytes)", len(content))
 				return PreviewLoadedMsg{Content: content}
 			}
-			logDebug("loadPreview: pane capture failed, falling through")
-			// Fallback to rich preview if capture fails
 		}
 
-		// For non-tmux sessions, show git/directory info
-		if path != "" {
-			logDebug("loadPreview: non-tmux with path, generating rich preview")
-			content := GenerateRichPreview(session.Name, path, isActive, isGit)
-			logDebug("loadPreview: GenerateRichPreview done (%d bytes)", len(content))
-			return PreviewLoadedMsg{Content: content}
+		// Non-git with path: directory tree
+		dirTree := getDirectoryTree(path, isActive)
+		cyan := colorCyan
+		if !isActive {
+			cyan = colorCyanDim
 		}
-
-		// Final fallback to default previewer
-		logDebug("loadPreview: fallback to default previewer")
-		content, err := p.Preview(session.Name)
-		if err != nil {
-			return PreviewLoadedMsg{Content: "Error loading preview: " + err.Error()}
-		}
-		if content == "" {
-			return PreviewLoadedMsg{Content: "No preview available"}
-		}
-		logDebug("loadPreview: default previewer done (%d bytes)", len(content))
+		content := fmt.Sprintf("%s📁 %s%s\n%s", cyan, path, colorReset, dirTree)
 		return PreviewLoadedMsg{Content: content}
 	}
-}
-
-// debouncePreview creates a debounced preview loading command
-// This prevents preview flickering during rapid cursor navigation
-func debouncePreview(sessionName string) tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return DebounceTickMsg{SessionName: sessionName}
-	})
 }
 
 // saveDefaults writes worktree defaults to disk asynchronously
@@ -259,6 +272,25 @@ func saveSessionState(sessionName string) tea.Cmd {
 	}
 }
 
+// restoreSessionState runs tmux-session-saver restore for a tmux session.
+func restoreSessionState(sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("tmux-session-saver", "restore", sessionName)
+		err := cmd.Run()
+		return SessionRestoredMsg{SessionName: sessionName, Err: err}
+	}
+}
+
+// getCurrentTmuxSession returns the name of the current tmux session.
+func getCurrentTmuxSession() string {
+	cmd := exec.Command("tmux", "display-message", "-p", "#S")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
 // killSessionWithCleanup gracefully cleans up panes, kills the session, then cleans up orphans.
 // Runs entirely async so the TUI stays responsive.
 func killSessionWithCleanup(t tmux.Tmux, sessionName string) tea.Cmd {
@@ -281,15 +313,33 @@ func killSessionWithCleanup(t tmux.Tmux, sessionName string) tea.Cmd {
 	}
 }
 
-// checkClaudeAttention queries Claude's sessions.db for sessions needing user attention.
-// Returns a map of tmux session names that have awaiting CC sessions.
+// scheduleClaudeAttentionTick returns a command that fires a re-check after 2 seconds.
+func scheduleClaudeAttentionTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return claudeAttentionTickMsg{}
+	})
+}
+
+// checkClaudeAttention reads @claude_icon from tmux windows to detect sessions
+// needing user attention. Uses tmux window options set by claude-sessions hooks
+// in real-time — no DB query, no SQLite locking.
 func checkClaudeAttention() tea.Cmd {
 	return func() tea.Msg {
-		homeDir, err := os.UserHomeDir()
+		out, err := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}\t#{@claude_icon}").Output()
 		if err != nil {
 			return ClaudeAttentionMsg{Sessions: nil}
 		}
-		sessions, _ := claude.SessionsNeedingAttention(homeDir)
+
+		sessions := make(map[string]bool)
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			parts := strings.SplitN(line, "\t", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			if strings.Contains(parts[1], "🖐") {
+				sessions[parts[0]] = true
+			}
+		}
 		return ClaudeAttentionMsg{Sessions: sessions}
 	}
 }
