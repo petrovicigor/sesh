@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -14,6 +15,39 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// claudeDBPool holds a reusable SQLite connection for Claude sessions queries.
+// Opened lazily on first use, shared across all preview loads (thread-safe via database/sql).
+var (
+	claudeDBPool     *sql.DB
+	claudeDBOnce     sync.Once
+	claudeDBPath     string
+)
+
+func getClaudeDB() *sql.DB {
+	claudeDBOnce.Do(func() {
+		home := os.Getenv("HOME")
+		if home == "" {
+			return
+		}
+		claudeDBPath = filepath.Join(home, ".claude", "sessions.db")
+		if _, err := os.Stat(claudeDBPath); os.IsNotExist(err) {
+			return
+		}
+		db, err := sql.Open("sqlite", claudeDBPath)
+		if err != nil {
+			return
+		}
+		// Read-only access: never block Claude Code's writes
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+		db.Exec("PRAGMA query_only = ON")
+		db.Exec("PRAGMA wal_autocheckpoint = 0")
+		db.Exec("PRAGMA busy_timeout = 50")
+		claudeDBPool = db
+	})
+	return claudeDBPool
+}
 
 // ANSI color codes
 const (
@@ -32,96 +66,26 @@ const (
 	colorMagentaDim = "\033[2;35m"
 )
 
+// gitData holds results from git commands for a regular git repo.
+type gitData struct {
+	branch   string
+	tracking string
+	status   string
+	commits  string
+}
+
+// workspaceGitData holds results from filtered git commands for workspace sub-projects.
+type workspaceGitData struct {
+	branch          string
+	tracking        string
+	filteredStatus  string
+	otherCount      int
+	filteredCommits string
+	relPrefix       string
+}
+
 // Pre-compiled regex for dimANSI (avoids recompilation per preview)
 var dimANSIRegex = regexp.MustCompile(`\x1b\[([1-9][0-9;]*)m`)
-
-// GenerateRichPreview creates a rich preview similar to preview.sh
-// Git commands run in parallel for better performance.
-// isGit indicates whether the path is a git repo (caller checks to avoid double stat).
-func GenerateRichPreview(sessionName string, path string, isActive bool, isGit bool) string {
-	logDebug("GenerateRichPreview: start for %q (active=%v, git=%v)", sessionName, isActive, isGit)
-	var output strings.Builder
-
-	// Select colors based on active/inactive
-	cyan := colorCyan
-	green := colorGreen
-	if !isActive {
-		cyan = colorCyanDim
-		green = colorGreenDim
-	}
-
-	if isGit {
-		logDebug("GenerateRichPreview: is git repo, launching parallel commands")
-		// Run all git commands in parallel
-		var wg sync.WaitGroup
-		var branch, tracking, status, commits, claudeSessions string
-
-		wg.Add(5)
-
-		// Parallel git command execution
-		go func() {
-			defer wg.Done()
-			branch = getGitBranch(path)
-		}()
-
-		go func() {
-			defer wg.Done()
-			tracking = getGitTracking(path)
-		}()
-
-		go func() {
-			defer wg.Done()
-			status = getGitStatus(path, isActive)
-		}()
-
-		go func() {
-			defer wg.Done()
-			commits = getGitLog(path, isActive)
-		}()
-
-		go func() {
-			defer wg.Done()
-			claudeSessions = getClaudeSessions(path, sessionName, isActive)
-		}()
-
-		// Wait for all commands to complete
-		wg.Wait()
-		logDebug("GenerateRichPreview: all parallel commands done")
-
-		// Build output with results
-		output.WriteString(fmt.Sprintf("%s󰘬 %s%s%s%s\n\n", cyan, branch, green, tracking, colorReset))
-
-		if claudeSessions != "" {
-			output.WriteString(claudeSessions)
-			output.WriteString("\n")
-		}
-
-		output.WriteString(fmt.Sprintf("%s━━━ Status ━━━%s\n", colorDim, colorReset))
-		if status == "" {
-			output.WriteString(fmt.Sprintf("%sclean%s\n", colorDim, colorReset))
-		} else {
-			output.WriteString(status + "\n")
-		}
-		output.WriteString("\n")
-
-		output.WriteString(fmt.Sprintf("%s━━━ Recent Commits ━━━%s\n", colorDim, colorReset))
-		output.WriteString(commits)
-	} else {
-		// Non-git directory
-		if isActive {
-			// For active sessions, show directory path
-			output.WriteString(fmt.Sprintf("%s📁 %s%s\n", cyan, path, colorReset))
-		} else {
-			// For inactive sessions, show directory tree
-			output.WriteString(fmt.Sprintf("%s📁 %s%s\n", cyan, path, colorReset))
-			tree := getDirectoryTree(path, isActive)
-			output.WriteString(tree)
-		}
-
-	}
-
-	return output.String()
-}
 
 // isInsideGitWorkTree checks if a path is inside a git work tree (but not necessarily at the root).
 // Used to detect workspace sub-projects that live inside a monorepo.
@@ -135,8 +99,8 @@ func isInsideGitWorkTree(path string) bool {
 }
 
 // getGitRelativePrefix returns the path relative to the git root (e.g., "packages/ui").
-func getGitRelativePrefix(path string) string {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--show-prefix")
+func getGitRelativePrefix(ctx context.Context, path string) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--show-prefix")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -146,19 +110,19 @@ func getGitRelativePrefix(path string) string {
 
 // getGitStatusFiltered returns git status filtered to the current directory and the count
 // of other changes outside this directory. Both commands run in parallel.
-func getGitStatusFiltered(path string, isActive bool) (filtered string, otherCount int) {
+func getGitStatusFiltered(ctx context.Context, path string, isActive bool) (filtered string, otherCount int) {
 	var wg sync.WaitGroup
 	var filteredOut, totalOut []byte
 
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		cmd := exec.Command("git", "-C", path, "-c", "color.status=always", "status", "--short", "--", ".")
+		cmd := exec.CommandContext(ctx, "git", "-C", path, "-c", "color.status=always", "status", "--short", "--", ".")
 		filteredOut, _ = cmd.Output()
 	}()
 	go func() {
 		defer wg.Done()
-		cmd := exec.Command("git", "-C", path, "status", "--short")
+		cmd := exec.CommandContext(ctx, "git", "-C", path, "status", "--short")
 		totalOut, _ = cmd.Output()
 	}()
 	wg.Wait()
@@ -177,13 +141,12 @@ func getGitStatusFiltered(path string, isActive bool) (filtered string, otherCou
 }
 
 // getGitLogFiltered returns git log filtered to changes in the current directory.
-func getGitLogFiltered(path string, isActive bool) string {
-	cmd := exec.Command("git", "-C", path, "log", "--oneline", "--graph", "--decorate", "--color=always", "-3", "--", ".")
+func getGitLogFiltered(ctx context.Context, path string, isActive bool) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "log", "--oneline", "--graph", "--decorate", "--color=always", "-3", "--", ".")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-
 	log := string(output)
 	if !isActive {
 		log = dimANSI(log)
@@ -202,87 +165,6 @@ func countNonEmptyLines(s string) int {
 	return count
 }
 
-// GenerateWorkspacePreview creates a rich preview for workspace sub-projects (monorepo packages/apps).
-// Similar to GenerateRichPreview but filters git status and log to the sub-project directory,
-// and shows a count of other changes outside the sub-project.
-func GenerateWorkspacePreview(sessionName string, path string, isActive bool) string {
-	logDebug("GenerateWorkspacePreview: start for %q (active=%v)", sessionName, isActive)
-	var output strings.Builder
-
-	cyan := colorCyan
-	green := colorGreen
-	if !isActive {
-		cyan = colorCyanDim
-		green = colorGreenDim
-	}
-
-	var wg sync.WaitGroup
-	var branch, tracking, filteredStatus, commits, claudeSessions, relPrefix string
-	var otherCount int
-
-	wg.Add(6)
-
-	go func() {
-		defer wg.Done()
-		branch = getGitBranch(path)
-	}()
-
-	go func() {
-		defer wg.Done()
-		tracking = getGitTracking(path)
-	}()
-
-	go func() {
-		defer wg.Done()
-		filteredStatus, otherCount = getGitStatusFiltered(path, isActive)
-	}()
-
-	go func() {
-		defer wg.Done()
-		commits = getGitLogFiltered(path, isActive)
-	}()
-
-	go func() {
-		defer wg.Done()
-		claudeSessions = getClaudeSessions(path, sessionName, isActive)
-	}()
-
-	go func() {
-		defer wg.Done()
-		relPrefix = getGitRelativePrefix(path)
-	}()
-
-	wg.Wait()
-	logDebug("GenerateWorkspacePreview: all parallel commands done")
-
-	// Build output
-	output.WriteString(fmt.Sprintf("%s󰘬 %s%s%s%s\n\n", cyan, branch, green, tracking, colorReset))
-
-	if claudeSessions != "" {
-		output.WriteString(claudeSessions)
-		output.WriteString("\n")
-	}
-
-	output.WriteString(fmt.Sprintf("%s━━━ Status ━━━%s\n", colorDim, colorReset))
-	if filteredStatus == "" {
-		output.WriteString(fmt.Sprintf("%sclean%s\n", colorDim, colorReset))
-	} else {
-		output.WriteString(filteredStatus + "\n")
-	}
-	if otherCount > 0 {
-		label := relPrefix
-		if label == "" {
-			label = "this directory"
-		}
-		output.WriteString(fmt.Sprintf("  %s%d other files changed outside %s%s\n", colorDim, otherCount, label, colorReset))
-	}
-	output.WriteString("\n")
-
-	output.WriteString(fmt.Sprintf("%s━━━ Recent Commits ━━━%s\n", colorDim, colorReset))
-	output.WriteString(commits)
-
-	return output.String()
-}
 
 // savedStateData holds parsed data from a tmux-session-saver JSON file.
 type savedStateData struct {
@@ -556,6 +438,94 @@ func generateSaveAllProgress(allSessions []string, completed []string) string {
 	return out.String()
 }
 
+// fetchGitData runs git commands in parallel and returns cacheable data.
+// Does NOT fetch Claude sessions (those are always fetched fresh).
+// Respects context cancellation to abort early when the user navigates away.
+func fetchGitData(ctx context.Context, path string, isActive bool) *gitData {
+	var wg sync.WaitGroup
+	var data gitData
+	wg.Add(4)
+	go func() { defer wg.Done(); data.branch = getGitBranch(ctx, path) }()
+	go func() { defer wg.Done(); data.tracking = getGitTracking(ctx, path) }()
+	go func() { defer wg.Done(); data.status = getGitStatus(ctx, path, isActive) }()
+	go func() { defer wg.Done(); data.commits = getGitLog(ctx, path, isActive) }()
+	wg.Wait()
+	return &data
+}
+
+// fetchWorkspaceGitData runs filtered git commands in parallel for workspace sub-projects.
+// Does NOT fetch Claude sessions (those are always fetched fresh).
+func fetchWorkspaceGitData(ctx context.Context, path string, isActive bool) *workspaceGitData {
+	var wg sync.WaitGroup
+	var data workspaceGitData
+	wg.Add(5)
+	go func() { defer wg.Done(); data.branch = getGitBranch(ctx, path) }()
+	go func() { defer wg.Done(); data.tracking = getGitTracking(ctx, path) }()
+	go func() {
+		defer wg.Done()
+		data.filteredStatus, data.otherCount = getGitStatusFiltered(ctx, path, isActive)
+	}()
+	go func() { defer wg.Done(); data.filteredCommits = getGitLogFiltered(ctx, path, isActive) }()
+	go func() { defer wg.Done(); data.relPrefix = getGitRelativePrefix(ctx, path) }()
+	wg.Wait()
+	return &data
+}
+
+// composeGitPreview assembles a git preview from cached data and fresh Claude sessions.
+func composeGitPreview(sessionName string, isActive bool, data *gitData, claudeSessions string) string {
+	cyan, green := colorCyan, colorGreen
+	if !isActive {
+		cyan, green = colorCyanDim, colorGreenDim
+	}
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("%s󰘬 %s%s%s%s\n\n", cyan, data.branch, green, data.tracking, colorReset))
+	if claudeSessions != "" {
+		output.WriteString(claudeSessions)
+		output.WriteString("\n")
+	}
+	output.WriteString(fmt.Sprintf("%s━━━ Status ━━━%s\n", colorDim, colorReset))
+	if data.status == "" {
+		output.WriteString(fmt.Sprintf("%sclean%s\n", colorDim, colorReset))
+	} else {
+		output.WriteString(data.status + "\n")
+	}
+	output.WriteString("\n")
+	output.WriteString(fmt.Sprintf("%s━━━ Recent Commits ━━━%s\n", colorDim, colorReset))
+	output.WriteString(data.commits)
+	return output.String()
+}
+
+// composeWorkspacePreviewFromCache assembles a workspace preview from cached data and fresh Claude sessions.
+func composeWorkspacePreviewFromCache(sessionName string, isActive bool, data *workspaceGitData, claudeSessions string) string {
+	cyan, green := colorCyan, colorGreen
+	if !isActive {
+		cyan, green = colorCyanDim, colorGreenDim
+	}
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("%s󰘬 %s%s%s%s\n\n", cyan, data.branch, green, data.tracking, colorReset))
+	if claudeSessions != "" {
+		output.WriteString(claudeSessions)
+		output.WriteString("\n")
+	}
+	output.WriteString(fmt.Sprintf("%s━━━ Status ━━━%s\n", colorDim, colorReset))
+	if data.filteredStatus == "" {
+		output.WriteString(fmt.Sprintf("%sclean%s\n", colorDim, colorReset))
+	} else {
+		output.WriteString(data.filteredStatus + "\n")
+	}
+	if data.otherCount > 0 {
+		label := data.relPrefix
+		if label == "" {
+			label = "this directory"
+		}
+		output.WriteString(fmt.Sprintf("  %s%d other files changed outside %s%s\n", colorDim, data.otherCount, label, colorReset))
+	}
+	output.WriteString("\n")
+	output.WriteString(fmt.Sprintf("%s━━━ Recent Commits ━━━%s\n", colorDim, colorReset))
+	output.WriteString(data.filteredCommits)
+	return output.String()
+}
+
 func isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
 	info, err := os.Stat(gitDir)
@@ -571,8 +541,8 @@ func isGitRepo(path string) bool {
 	return true
 }
 
-func getGitBranch(path string) string {
-	cmd := exec.Command("git", "-C", path, "branch", "--show-current")
+func getGitBranch(ctx context.Context, path string) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "branch", "--show-current")
 	output, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -580,8 +550,8 @@ func getGitBranch(path string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func getGitTracking(path string) string {
-	cmd := exec.Command("git", "-C", path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
+func getGitTracking(ctx context.Context, path string) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -605,31 +575,27 @@ func getGitTracking(path string) string {
 	return tracking
 }
 
-func getGitStatus(path string, isActive bool) string {
-	cmd := exec.Command("git", "-C", path, "-c", "color.status=always", "status", "--short")
+func getGitStatus(ctx context.Context, path string, isActive bool) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "-c", "color.status=always", "status", "--short")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-
 	status := string(output)
 	if !isActive {
-		// Dim colors for inactive sessions
 		status = dimANSI(status)
 	}
 	return strings.TrimSpace(status)
 }
 
-func getGitLog(path string, isActive bool) string {
-	cmd := exec.Command("git", "-C", path, "log", "--oneline", "--graph", "--decorate", "--color=always", "-3")
+func getGitLog(ctx context.Context, path string, isActive bool) string {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "log", "--oneline", "--graph", "--decorate", "--color=always", "-3")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-
 	log := string(output)
 	if !isActive {
-		// Dim colors for inactive sessions
 		log = dimANSI(log)
 	}
 	return log
@@ -665,16 +631,10 @@ func dimANSI(s string) string {
 }
 
 func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) string {
-	dbPath := filepath.Join(os.Getenv("HOME"), ".claude", "sessions.db")
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	db := getClaudeDB()
+	if db == nil {
 		return ""
 	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return ""
-	}
-	defer db.Close()
 
 	// Use tmux session name or project name for matching
 	tmuxMatch := tmuxSession
