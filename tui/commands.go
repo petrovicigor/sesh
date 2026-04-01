@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/joshmedeski/sesh/v2/claude"
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
@@ -320,27 +321,46 @@ func scheduleClaudeAttentionTick() tea.Cmd {
 	})
 }
 
-// checkClaudeAttention reads @claude_icon from tmux windows to detect sessions
-// needing user attention. Uses tmux window options set by claude-sessions hooks
-// in real-time — no DB query, no SQLite locking.
+// checkClaudeAttention detects sessions needing user attention using a hybrid
+// approach: tmux @claude_icon for fast detection (set instantly by hooks),
+// then DB + process liveness to filter stale icons from dead processes or
+// debounce bugs where the icon wasn't cleared after approval.
 func checkClaudeAttention() tea.Cmd {
 	return func() tea.Msg {
+		// Fast path: read @claude_icon from tmux windows
 		out, err := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}\t#{@claude_icon}").Output()
 		if err != nil {
 			return ClaudeAttentionMsg{Sessions: nil}
 		}
 
-		sessions := make(map[string]bool)
+		candidates := make(map[string]bool)
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			parts := strings.SplitN(line, "\t", 2)
 			if len(parts) != 2 {
 				continue
 			}
 			if strings.Contains(parts[1], "🖐") {
-				sessions[parts[0]] = true
+				candidates[parts[0]] = true
 			}
 		}
-		return ClaudeAttentionMsg{Sessions: sessions}
+		if len(candidates) == 0 {
+			return ClaudeAttentionMsg{Sessions: nil}
+		}
+
+		// Validate with DB + process liveness check
+		homeDir, _ := os.UserHomeDir()
+		if homeDir == "" {
+			return ClaudeAttentionMsg{Sessions: nil}
+		}
+		verified, _ := claude.SessionsNeedingAttention(homeDir)
+
+		result := make(map[string]bool)
+		for session := range candidates {
+			if verified[session] {
+				result[session] = true
+			}
+		}
+		return ClaudeAttentionMsg{Sessions: result}
 	}
 }
 

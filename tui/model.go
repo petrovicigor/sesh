@@ -189,6 +189,7 @@ type Model struct {
 	restoreAllCurrentSession string   // current tmux session name (restored last via quit flow)
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
+	showPreview            bool   // true when preview pane is visible (toggled with ctrl+f)
 	isDark                 bool   // terminal dark mode (detected via BackgroundColorMsg)
 	statusMessage          string // transient status message (auto-clears after timeout)
 
@@ -258,6 +259,7 @@ func newModel(
 		sessions:         sessions,
 		width:            0,
 		height:           0,
+		showPreview:      false, // default: hidden, toggle with ctrl+f
 		isDark:           true, // default until BackgroundColorMsg arrives
 		currentFilter:    FilterAll,
 		previewContent:   "",
@@ -351,7 +353,7 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	// Load preview for first item if available
-	if m.list.SelectedItem() != nil {
+	if m.list.SelectedItem() != nil && m.showPreview {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			logDebug("Init: queuing preview load for %q", item.session.Name)
 			return tea.Batch(filterCmd, bgColorCmd, loadPreview(context.Background(), m.previewer, item.session), checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState())

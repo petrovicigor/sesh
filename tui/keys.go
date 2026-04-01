@@ -22,6 +22,7 @@ type KeyMap struct {
 	SaveSession       key.Binding
 	SaveAll           key.Binding
 	RestoreAll        key.Binding
+	TogglePreview     key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -100,5 +101,9 @@ var DefaultKeyMap = KeyMap{
 	RestoreAll: key.NewBinding(
 		key.WithKeys("ctrl+a"),
 		key.WithHelp("ctrl+a", "restore all sessions"),
+	),
+	TogglePreview: key.NewBinding(
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "toggle preview"),
 	),
 }

@@ -245,11 +245,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	case separatorItem:
 		// Render a dim separator line — not selectable, cursor skips over it
-		label := " ─── available "
-		remaining := m.Width() - lipgloss.Width(label)
-		if remaining > 0 {
-			label += strings.Repeat("─", remaining)
-		}
+		label := " " + strings.Repeat("─", m.Width()-1)
 		fmt.Fprint(w, separatorStyle.Render(label))
 		return
 

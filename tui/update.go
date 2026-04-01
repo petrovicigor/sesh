@@ -19,6 +19,9 @@ import (
 // handleCursorMove loads preview for the current item immediately.
 // Context cancellation kills any in-flight preview load — no debounce needed.
 func (m Model) handleCursorMove() (Model, tea.Cmd) {
+	if !m.showPreview {
+		return m, nil
+	}
 	switch item := m.list.SelectedItem().(type) {
 	case sessionItem:
 		return m.loadPreviewForItem(item)
@@ -36,6 +39,34 @@ func (m *Model) cancelInflightPreview() {
 		m.previewCancel()
 		m.previewCancel = nil
 	}
+}
+
+// applyLayout recalculates list and preview sizes based on showPreview state.
+// When toggling preview on, loads preview for the current item.
+func (m Model) applyLayout() (Model, tea.Cmd) {
+	if m.showPreview {
+		listBoxWidth := (m.width * 45) / 100
+		previewBoxWidth := m.width - listBoxWidth
+		m.list.SetSize(listBoxWidth-4, m.height-4)
+		m.previewPort.SetWidth(previewBoxWidth - 4)
+		m.previewPort.SetHeight(m.height - 4)
+	} else {
+		m.list.SetSize(m.width-4, m.height-4)
+	}
+	if m.showPreview && m.previewContent != "" {
+		m.previewPort.SetContent(m.previewContent)
+	}
+	if m.showPreview {
+		switch item := m.list.SelectedItem().(type) {
+		case sessionItem:
+			return m.loadPreviewForItem(item)
+		case worktreeGroupItem:
+			if rep, ok := representativeSession(item); ok {
+				return m.loadPreviewForItem(rep)
+			}
+		}
+	}
+	return m, nil
 }
 
 // loadPreviewForItem cancels any in-flight preview and starts a new load immediately.
@@ -122,7 +153,7 @@ found:
 	m.list.Select(targetIndex)
 
 	// Load preview for target item
-	if targetIndex < len(displayItems) {
+	if m.showPreview && targetIndex < len(displayItems) {
 		if item, ok := displayItems[targetIndex].(sessionItem); ok {
 			m.previewPort.SetContent("")
 			return m, loadPreview(context.Background(), m.previewer,item.session)
@@ -177,7 +208,7 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	m.list.Select(targetIndex)
 
 	// Load preview for target item
-	if targetIndex < len(displayItems) {
+	if m.showPreview && targetIndex < len(displayItems) {
 		if item, ok := displayItems[targetIndex].(sessionItem); ok {
 			return m, loadPreview(context.Background(), m.previewer,item.session)
 		}
@@ -366,9 +397,11 @@ func (m Model) exitRestorePreview() (Model, tea.Cmd) {
 	m.restoreAllCompleted = nil
 	m.restoreAllCurrentSession = ""
 	// Reload normal preview for currently selected item
-	if item, ok := m.list.SelectedItem().(sessionItem); ok {
-		m.previewPort.SetContent("")
-		return m, loadPreview(context.Background(), m.previewer, item.session)
+	if m.showPreview {
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			m.previewPort.SetContent("")
+			return m, loadPreview(context.Background(), m.previewer, item.session)
+		}
 	}
 	m.previewPort.SetContent("")
 	m.previewContent = ""
@@ -407,9 +440,11 @@ func (m Model) exitSavePreview() (Model, tea.Cmd) {
 	m.saveAllSessions = nil
 	m.saveAllCompleted = nil
 	// Reload normal preview for currently selected item
-	if item, ok := m.list.SelectedItem().(sessionItem); ok {
-		m.previewPort.SetContent("")
-		return m, loadPreview(context.Background(), m.previewer,item.session)
+	if m.showPreview {
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			m.previewPort.SetContent("")
+			return m, loadPreview(context.Background(), m.previewer,item.session)
+		}
 	}
 	m.previewPort.SetContent("")
 	m.previewContent = ""
@@ -422,26 +457,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logDebug("WindowSizeMsg: %dx%d", msg.Width, msg.Height)
 		m.width = msg.Width
 		m.height = msg.Height
-
-		// Split width: 45% for list, 55% for preview
-		// Each box decoration: border(2) + padding(2) = 4 chars total
-		listBoxWidth := (msg.Width * 45) / 100
-		previewBoxWidth := msg.Width - listBoxWidth
-
-		// Content width = box width - decoration (4 chars)
-		listContentWidth := listBoxWidth - 4
-		previewContentWidth := previewBoxWidth - 4
-
-		m.list.SetSize(listContentWidth, msg.Height-4)
-		m.previewPort.SetWidth(previewContentWidth)
-		m.previewPort.SetHeight(msg.Height - 4)
-
-		// Re-set preview content (viewport handles width/truncation)
-		if m.previewContent != "" {
-			m.previewPort.SetContent(m.previewContent)
-		}
-
-		return m, nil
+		return m.applyLayout()
 
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
@@ -528,9 +544,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Load preview for selected item
 			var previewCmd tea.Cmd
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				m.previewPort.SetContent("")
-				previewCmd = loadPreview(context.Background(), m.previewer,item.session)
+			if m.showPreview {
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.previewPort.SetContent("")
+					previewCmd = loadPreview(context.Background(), m.previewer,item.session)
+				}
 			}
 			return m, previewCmd
 		}
@@ -544,14 +562,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Load preview for first session
 		var previewCmd tea.Cmd
-		if len(items) > 0 {
+		if m.showPreview && len(items) > 0 {
 			if firstItem, ok := items[0].(sessionItem); ok {
 				// Blank preview while loading
 				m.previewPort.SetContent("")
 				previewCmd = loadPreview(context.Background(), m.previewer,firstItem.session)
 			}
 		} else {
-			// No items - clear preview
+			// No items or preview hidden - clear preview
 			m.previewPort.SetContent("")
 		}
 
@@ -563,8 +581,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
-		// Don't let async preview overwrite the restore confirmation screen
-		if m.restorePreviewMode {
+		// Discard late-arriving previews when preview is hidden or during restore confirmation
+		if !m.showPreview || m.restorePreviewMode {
 			return m, nil
 		}
 		logDebug("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
@@ -675,12 +693,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.savePreviewMode = false
 			m.savePreviewSession = ""
 			// Reload normal preview
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				m.previewPort.SetContent("")
-				return m, tea.Batch(
-					loadPreview(context.Background(), m.previewer,item.session),
-					tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
-				)
+			if m.showPreview {
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.previewPort.SetContent("")
+					return m, tea.Batch(
+						loadPreview(context.Background(), m.previewer,item.session),
+						tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
+					)
+				}
 			}
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
 		}
@@ -702,12 +722,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.savePreviewSession = ""
 			m.saveAllSessions = nil
 			m.saveAllCompleted = nil
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				m.previewPort.SetContent("")
-				return m, tea.Batch(
-					loadPreview(context.Background(), m.previewer, item.session),
-					tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
-				)
+			if m.showPreview {
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.previewPort.SetContent("")
+					return m, tea.Batch(
+						loadPreview(context.Background(), m.previewer, item.session),
+						tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
+					)
+				}
 			}
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
 		}
@@ -792,12 +814,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.restoreAllSessions = nil
 			m.restoreAllCompleted = nil
 			m.restoreAllCurrentSession = ""
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				m.previewPort.SetContent("")
-				return m, tea.Batch(
-					loadPreview(context.Background(), m.previewer, item.session),
-					tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
-				)
+			if m.showPreview {
+				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					m.previewPort.SetContent("")
+					return m, tea.Batch(
+						loadPreview(context.Background(), m.previewer, item.session),
+						tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
+					)
+				}
 			}
 			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
 		}
@@ -1177,15 +1201,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.Select(targetIndex)
 			m.list.Title = getFilterTitle(m.currentFilter, m.groupMode)
 			// Load preview for selected item
-			switch item := m.list.SelectedItem().(type) {
-			case sessionItem:
-				return m.loadPreviewForItem(item)
-			case worktreeGroupItem:
-				if rep, ok := representativeSession(item); ok {
-					return m.loadPreviewForItem(rep)
+			if m.showPreview {
+				switch item := m.list.SelectedItem().(type) {
+				case sessionItem:
+					return m.loadPreviewForItem(item)
+				case worktreeGroupItem:
+					if rep, ok := representativeSession(item); ok {
+						return m.loadPreviewForItem(rep)
+					}
 				}
 			}
 			return m, nil
+
+		case key.Matches(msg, m.keys.TogglePreview):
+			m.showPreview = !m.showPreview
+			if !m.showPreview {
+				m.cancelInflightPreview()
+			}
+			return m.applyLayout()
 
 		case key.Matches(msg, m.keys.Delete):
 			// Delete session if it's a tmux session
@@ -1219,7 +1252,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if rootItem.session.Name == rootName {
 								m.list.Select(i)
 								// Load preview for the root session
-								return m.loadPreviewForItem(rootItem)
+								if m.showPreview {
+									return m.loadPreviewForItem(rootItem)
+								}
+								return m, nil
 							}
 						}
 					}
@@ -1356,7 +1392,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.Select(targetIndex)
 
 			// Load preview for target item
-			if targetIndex < len(displayItems) {
+			if m.showPreview && targetIndex < len(displayItems) {
 				if item, ok := displayItems[targetIndex].(sessionItem); ok {
 					return m, loadPreview(context.Background(), m.previewer,item.session)
 				}
@@ -1421,12 +1457,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.SetSize(m.list.Width(), m.list.Height())
 
 				m.list.Select(0)
-				switch item := m.list.SelectedItem().(type) {
-				case sessionItem:
-					return m.loadPreviewForItem(item)
-				case worktreeGroupItem:
-					if rep, ok := representativeSession(item); ok {
-						return m.loadPreviewForItem(rep)
+				if m.showPreview {
+					switch item := m.list.SelectedItem().(type) {
+					case sessionItem:
+						return m.loadPreviewForItem(item)
+					case worktreeGroupItem:
+						if rep, ok := representativeSession(item); ok {
+							return m.loadPreviewForItem(rep)
+						}
 					}
 				}
 				return m, nil
@@ -1434,16 +1472,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.list.Select(0)
 			// Load preview for top item or group representative
-			switch item := m.list.SelectedItem().(type) {
-			case sessionItem:
-				newModel, previewCmd := m.loadPreviewForItem(item)
-				m = newModel
-				return m, tea.Batch(cmd, previewCmd)
-			case worktreeGroupItem:
-				if rep, ok := representativeSession(item); ok {
-					newModel, previewCmd := m.loadPreviewForItem(rep)
+			if m.showPreview {
+				switch item := m.list.SelectedItem().(type) {
+				case sessionItem:
+					newModel, previewCmd := m.loadPreviewForItem(item)
 					m = newModel
 					return m, tea.Batch(cmd, previewCmd)
+				case worktreeGroupItem:
+					if rep, ok := representativeSession(item); ok {
+						newModel, previewCmd := m.loadPreviewForItem(rep)
+						m = newModel
+						return m, tea.Batch(cmd, previewCmd)
+					}
 				}
 			}
 		}

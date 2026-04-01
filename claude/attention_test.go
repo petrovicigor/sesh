@@ -27,13 +27,14 @@ func setupTestDB(t *testing.T) string {
 		tmux_session TEXT,
 		status TEXT,
 		ended_at TEXT,
-		replaced_by_session_id TEXT
+		replaced_by_session_id TEXT,
+		pid INTEGER
 	)`)
 	require.NoError(t, err)
 	return dir
 }
 
-func insertSession(t *testing.T, dir, sessionID, tmuxSession, status string, ended bool) {
+func insertSession(t *testing.T, dir, sessionID, tmuxSession, status string, ended bool, pid int) {
 	t.Helper()
 	dbPath := filepath.Join(dir, ".claude", "sessions.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -46,8 +47,8 @@ func insertSession(t *testing.T, dir, sessionID, tmuxSession, status string, end
 		endedAt = &v
 	}
 	_, err = db.Exec(
-		"INSERT INTO sessions (session_id, tmux_session, status, ended_at) VALUES (?, ?, ?, ?)",
-		sessionID, tmuxSession, status, endedAt)
+		"INSERT INTO sessions (session_id, tmux_session, status, ended_at, pid) VALUES (?, ?, ?, ?, ?)",
+		sessionID, tmuxSession, status, endedAt, pid)
 	require.NoError(t, err)
 }
 
@@ -59,19 +60,19 @@ func TestSessionsNeedingAttention_NoDB(t *testing.T) {
 
 func TestSessionsNeedingAttention_NoAwaitingSessions(t *testing.T) {
 	dir := setupTestDB(t)
-	insertSession(t, dir, "s1", "myproject", "thinking", false)
-	insertSession(t, dir, "s2", "other", "running:tool", false)
+	insertSession(t, dir, "s1", "myproject", "thinking", false, os.Getpid())
+	insertSession(t, dir, "s2", "other", "running:tool", false, os.Getpid())
 
 	result, err := SessionsNeedingAttention(dir)
 	assert.NoError(t, err)
 	assert.Empty(t, result)
 }
 
-func TestSessionsNeedingAttention_WithAwaitingSessions(t *testing.T) {
+func TestSessionsNeedingAttention_WithLiveProcess(t *testing.T) {
 	dir := setupTestDB(t)
-	insertSession(t, dir, "s1", "myproject", "awaiting:permission", false)
-	insertSession(t, dir, "s2", "other", "thinking", false)
-	insertSession(t, dir, "s3", "myproject", "running:tool", false)
+	// Use current PID (alive) for the awaiting session
+	insertSession(t, dir, "s1", "myproject", "awaiting:permission", false, os.Getpid())
+	insertSession(t, dir, "s2", "other", "thinking", false, os.Getpid())
 
 	result, err := SessionsNeedingAttention(dir)
 	assert.NoError(t, err)
@@ -79,35 +80,21 @@ func TestSessionsNeedingAttention_WithAwaitingSessions(t *testing.T) {
 	assert.False(t, result["other"])
 }
 
-func TestSessionsNeedingAttention_IgnoresEndedSessions(t *testing.T) {
+func TestSessionsNeedingAttention_SkipsDeadProcess(t *testing.T) {
 	dir := setupTestDB(t)
-	insertSession(t, dir, "s1", "myproject", "awaiting:permission", true) // ended
+	// PID 999999 almost certainly doesn't exist
+	insertSession(t, dir, "s1", "myproject", "awaiting:permission", false, 999999)
 
 	result, err := SessionsNeedingAttention(dir)
 	assert.NoError(t, err)
 	assert.Empty(t, result)
 }
 
-func TestNeedsAttention_True(t *testing.T) {
+func TestSessionsNeedingAttention_IgnoresEndedSessions(t *testing.T) {
 	dir := setupTestDB(t)
-	insertSession(t, dir, "s1", "myproject", "awaiting:permission", false)
+	insertSession(t, dir, "s1", "myproject", "awaiting:permission", true, os.Getpid())
 
-	result, err := NeedsAttention(dir, "myproject")
+	result, err := SessionsNeedingAttention(dir)
 	assert.NoError(t, err)
-	assert.True(t, result)
-}
-
-func TestNeedsAttention_False(t *testing.T) {
-	dir := setupTestDB(t)
-	insertSession(t, dir, "s1", "myproject", "thinking", false)
-
-	result, err := NeedsAttention(dir, "myproject")
-	assert.NoError(t, err)
-	assert.False(t, result)
-}
-
-func TestNeedsAttention_NoDB(t *testing.T) {
-	result, err := NeedsAttention("/nonexistent", "myproject")
-	assert.NoError(t, err)
-	assert.False(t, result)
+	assert.Empty(t, result)
 }

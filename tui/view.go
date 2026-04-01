@@ -41,15 +41,16 @@ func (m Model) View() tea.View {
 	// Two columns: list on left (with built-in title), preview on right
 	// Set explicit widths so boxes fill their allocated space exactly.
 	// In lipgloss v2, Width() includes borders and padding, so pass box width.
-	listBoxWidth := (m.width * 45) / 100
-	previewBoxWidth := m.width - listBoxWidth
-
-	listView := m.list.View()
-	styledListView := listStyle.Width(listBoxWidth).Render(listView)
-	previewView := previewStyle.Width(previewBoxWidth).Render(m.previewPort.View())
-
-	// Place side by side
-	columns := lipgloss.JoinHorizontal(lipgloss.Top, styledListView, previewView)
+	var columns string
+	if m.showPreview {
+		listBoxWidth := (m.width * 45) / 100
+		previewBoxWidth := m.width - listBoxWidth
+		styledListView := listStyle.Width(listBoxWidth).Render(m.list.View())
+		previewView := previewStyle.Width(previewBoxWidth).Render(m.previewPort.View())
+		columns = lipgloss.JoinHorizontal(lipgloss.Top, styledListView, previewView)
+	} else {
+		columns = listStyle.Width(m.width).Render(m.list.View())
+	}
 
 	// Add status message below columns if present
 	if m.restorePreviewMode {
