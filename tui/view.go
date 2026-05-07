@@ -38,11 +38,21 @@ var (
 	hintSepStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
-// renderHint formats key/description pairs as a status hint line.
+// renderHint formats key/description pairs as a status hint line with aligned spacing.
 func renderHint(pairs ...[2]string) string {
+	maxDescWidth := 0
+	for _, p := range pairs {
+		if w := lipgloss.Width(p[1]); w > maxDescWidth {
+			maxDescWidth = w
+		}
+	}
+
 	parts := make([]string, 0, len(pairs))
 	for _, p := range pairs {
-		parts = append(parts, hintKeyStyle.Render(p[0])+" "+hintDescStyle.Render(p[1]))
+		keyStr := hintKeyStyle.Render(p[0])
+		descStr := hintDescStyle.Render(p[1])
+		padding := strings.Repeat(" ", maxDescWidth-lipgloss.Width(p[1]))
+		parts = append(parts, keyStr+" "+descStr+padding)
 	}
 	return strings.Join(parts, hintSepStyle.Render("  ·  "))
 }
