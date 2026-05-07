@@ -38,21 +38,11 @@ var (
 	hintSepStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
-// renderHint formats key/description pairs as a status hint line with aligned spacing.
+// renderHint formats key/description pairs as a status hint line.
 func renderHint(pairs ...[2]string) string {
-	maxDescWidth := 0
-	for _, p := range pairs {
-		if w := lipgloss.Width(p[1]); w > maxDescWidth {
-			maxDescWidth = w
-		}
-	}
-
 	parts := make([]string, 0, len(pairs))
 	for _, p := range pairs {
-		keyStr := hintKeyStyle.Render(p[0])
-		descStr := hintDescStyle.Render(p[1])
-		padding := strings.Repeat(" ", maxDescWidth-lipgloss.Width(p[1]))
-		parts = append(parts, keyStr+" "+descStr+padding)
+		parts = append(parts, hintKeyStyle.Render(p[0])+" "+hintDescStyle.Render(p[1]))
 	}
 	return strings.Join(parts, hintSepStyle.Render("  ·  "))
 }
@@ -78,11 +68,12 @@ func (m Model) View() tea.View {
 	// the bordered area so it can't be clipped by lipgloss.Place.
 	listInner := m.list.View()
 	if m.expandedGroup != nil && *m.expandedGroup != "" {
-		hintLine := renderHint(
+		// Indent matches list-item prefix ("  " or "❯ ") so hint aligns with item text.
+		hintLine := "  " + renderHint(
 			[2]string{"ctrl+f", "set default"},
 			[2]string{"tab", "collapse"},
 		)
-		listInner = lipgloss.JoinVertical(lipgloss.Left, listInner, hintLine)
+		listInner = lipgloss.JoinVertical(lipgloss.Left, listInner, "", hintLine)
 	}
 
 	// Two columns: list on left (with built-in title), preview on right

@@ -87,12 +87,12 @@ func (m Model) toggleAndRelaunch(pendingAction string) (Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// listInnerHeight returns the list's inner content height, reserving one row for
-// the in-box hint when a worktree group is expanded.
+// listInnerHeight returns the list's inner content height, reserving two rows for
+// the blank spacer + hint line when a worktree group is expanded.
 func (m Model) listInnerHeight() int {
 	h := m.height - 4
 	if m.expandedGroup != nil && *m.expandedGroup != "" {
-		h--
+		h -= 2
 	}
 	return h
 }
