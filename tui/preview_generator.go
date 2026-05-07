@@ -811,16 +811,16 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		}
 	}
 
-	// Status icons and display
+	// Status icons and display — match miasma icons used in claude-sessions picker.
 	var statusIcon string
 	if status == "failed" {
 		statusIcon = colorRed + "✗" + colorReset
 	} else if status == "starting" {
-		statusIcon = colorYellow + "◐" + colorReset
+		statusIcon = colorYellow + "◈" + colorReset
 	} else if isActive {
-		statusIcon = colorGreen + "●" + colorReset
+		statusIcon = colorGreen + "◆" + colorReset
 	} else {
-		statusIcon = colorGray + "○" + colorReset
+		statusIcon = colorGray + "◇" + colorReset
 	}
 
 	// Status display
