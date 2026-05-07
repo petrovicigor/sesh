@@ -189,7 +189,7 @@ type Model struct {
 	restoreAllCurrentSession string   // current tmux session name (restored last via quit flow)
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
-	showPreview            bool   // true when preview pane is visible (toggled with ctrl+f)
+	showPreview            bool   // true when preview pane is visible (toggled with ctrl+p)
 	isDark                 bool   // terminal dark mode (detected via BackgroundColorMsg)
 	statusMessage          string // transient status message (auto-clears after timeout)
 
@@ -200,6 +200,15 @@ type Model struct {
 	workspaceExcludes    map[string][]string       // workspace name -> excluded sub-project paths
 	workspaceSubProjects map[string][]string       // cached discovered sub-projects (during manager mode)
 	excludesPath         string                    // path to workspace-excludes.json
+
+	// Pending state from a kill-and-relaunch toggle. nil on normal launch.
+	// Consumed by Init() which fires applyRestoreStateMsg once.
+	pendingRestore *RestoreState
+
+	// Deferred restore confirmation: set when a relaunched sesh wants to enter
+	// restore preview but savedState hasn't loaded yet (it's populated async via
+	// SavedStateMsg). Cleared when that message arrives and the action fires.
+	deferredRestore bool
 }
 
 func newModel(
@@ -214,6 +223,7 @@ func newModel(
 	defaultsPath string,
 	frecencyScores map[string]float64,
 	excludesPath string,
+	restore *RestoreState,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -255,11 +265,17 @@ func newModel(
 	// Create model instance first (we need to pass processInfo pointer to delegate)
 	// width/height start at 0 — View() returns "" until WindowSizeMsg arrives,
 	// preventing a wasted render at wrong default size (eliminates flicker).
+	initialShowPreview := false // default: hidden, toggle with ctrl+p
+	if restore != nil {
+		initialShowPreview = restore.ShowPreview
+	}
+
 	m := Model{
 		sessions:         sessions,
 		width:            0,
 		height:           0,
-		showPreview:      false, // default: hidden, toggle with ctrl+f
+		showPreview:      initialShowPreview,
+		pendingRestore:   restore,
 		isDark:           true, // default until BackgroundColorMsg arrives
 		currentFilter:    FilterAll,
 		previewContent:   "",
@@ -324,6 +340,14 @@ func newModel(
 	// Remove filter input prompt (will be set temporarily for indicator)
 	l.FilterInput.Prompt = ""
 
+	// Make filter input cursor a solid block (no blink) for better visibility.
+	// Clear Cursor.Color so Reverse uses the terminal's default foreground,
+	// giving a full-color block instead of the default dim ANSI 7 gray.
+	inputStyles := l.FilterInput.Styles()
+	inputStyles.Cursor.Blink = false
+	inputStyles.Cursor.Color = lipgloss.NoColor{}
+	l.FilterInput.SetStyles(inputStyles)
+
 	// Complete model initialization with remaining fields
 	m.lister = lister
 	m.connector = connector
@@ -342,23 +366,30 @@ func newModel(
 func (m Model) Init() tea.Cmd {
 	logDebug("Init() called with %d sessions", len(m.sessions.OrderedIndex))
 
-	// Enter filter mode asynchronously (allows typing to filter immediately)
-	filterCmd := func() tea.Msg {
-		return enterFilterMsg{}
-	}
-
 	// Request terminal background color for dark/light mode detection
 	bgColorCmd := func() tea.Msg {
 		return tea.RequestBackgroundColor()
+	}
+
+	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState()}
+
+	// When restoring from a kill-and-relaunch toggle, the restore handler owns
+	// filter-mode entry itself (it must enter filter mode BEFORE setting text,
+	// otherwise the '/' keypress lands in the filter input as a literal char).
+	// On normal launch, enterFilterMsg does this.
+	if m.pendingRestore != nil {
+		cmds = append(cmds, func() tea.Msg { return applyRestoreStateMsg{} })
+	} else {
+		cmds = append(cmds, func() tea.Msg { return enterFilterMsg{} })
 	}
 
 	// Load preview for first item if available
 	if m.list.SelectedItem() != nil && m.showPreview {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			logDebug("Init: queuing preview load for %q", item.session.Name)
-			return tea.Batch(filterCmd, bgColorCmd, loadPreview(context.Background(), m.previewer, item.session), checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState())
+			cmds = append(cmds, loadPreview(context.Background(), m.previewer, item.session))
 		}
 	}
 
-	return tea.Batch(filterCmd, bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState())
+	return tea.Batch(cmds...)
 }

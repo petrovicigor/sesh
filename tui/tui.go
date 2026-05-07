@@ -69,7 +69,12 @@ func (t *TUI) Run() (string, bool, error) {
 	// Compute excludes path for workspace manager
 	excludesPath := state.ExcludesPath(os.Getenv("XDG_STATE_HOME"))
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath)
+	// Rehydrate state from a prior kill-and-relaunch toggle, if any.
+	// See state_restore.go — the env var + temp file is written by a sibling
+	// sesh process before it asked tmux to queue this popup.
+	restore, _ := LoadRestoreState()
+
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, restore)
 	logDebug("newModel() done")
 
 	p := tea.NewProgram(m)

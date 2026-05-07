@@ -77,3 +77,7 @@ type clearStatusMsg struct{}
 
 // claudeAttentionTickMsg triggers a periodic re-check of Claude attention status.
 type claudeAttentionTickMsg struct{}
+
+// applyRestoreStateMsg applies persisted TUI state after a kill-and-relaunch
+// toggle. Sent once from Init() when the model was created with restore state.
+type applyRestoreStateMsg struct{}

@@ -41,22 +41,81 @@ func (m *Model) cancelInflightPreview() {
 	}
 }
 
+// toggleAndRelaunch serializes current TUI state (filter text, selected session,
+// target preview flag, optional pending action), asks tmux to queue a new popup
+// at the opposite size via tmux run-shell -b, and exits. The queued popup opens
+// after the current one closes, and the new sesh process reads the state file.
+//
+// pendingAction is empty for a plain ctrl+p toggle, or "save" / "restore" when
+// auto-expanding from compact mode in response to ctrl+s / ctrl+r.
+func (m Model) toggleAndRelaunch(pendingAction string) (Model, tea.Cmd) {
+	var sessionName string
+	switch item := m.list.SelectedItem().(type) {
+	case sessionItem:
+		sessionName = item.session.Name
+	case worktreeGroupItem:
+		if rep, ok := representativeSession(item); ok {
+			sessionName = rep.session.Name
+		} else {
+			sessionName = item.repoName
+		}
+	}
+
+	state := RestoreState{
+		Filter:        m.list.FilterValue(),
+		Cursor:        m.list.Index(),
+		ShowPreview:   !m.showPreview,
+		PendingAction: pendingAction,
+		SessionName:   sessionName,
+	}
+	// If this is an auto-expand triggered by save/restore, force preview on
+	// regardless of current state — the action's UI needs the preview pane.
+	if pendingAction != "" {
+		state.ShowPreview = true
+	}
+
+	if err := ScheduleRelaunch(state); err != nil {
+		// If the relaunch can't be scheduled, fall back to in-place toggle
+		// so the user isn't left in a broken state.
+		logDebug("toggleAndRelaunch: ScheduleRelaunch failed: %v", err)
+		m.showPreview = !m.showPreview
+		if !m.showPreview {
+			m.cancelInflightPreview()
+		}
+		return m.applyLayout()
+	}
+	return m, tea.Quit
+}
+
+// listInnerHeight returns the list's inner content height, reserving one row for
+// the in-box hint when a worktree group is expanded.
+func (m Model) listInnerHeight() int {
+	h := m.height - 4
+	if m.expandedGroup != nil && *m.expandedGroup != "" {
+		h--
+	}
+	return h
+}
+
 // applyLayout recalculates list and preview sizes based on showPreview state.
 // When toggling preview on, loads preview for the current item.
 func (m Model) applyLayout() (Model, tea.Cmd) {
+	listHeight := m.listInnerHeight()
 	if m.showPreview {
 		listBoxWidth := (m.width * 45) / 100
 		previewBoxWidth := m.width - listBoxWidth
-		m.list.SetSize(listBoxWidth-4, m.height-4)
+		m.list.SetSize(listBoxWidth-4, listHeight)
 		m.previewPort.SetWidth(previewBoxWidth - 4)
 		m.previewPort.SetHeight(m.height - 4)
 	} else {
-		m.list.SetSize(m.width-4, m.height-4)
+		m.list.SetSize(m.width-4, listHeight)
 	}
 	if m.showPreview && m.previewContent != "" {
 		m.previewPort.SetContent(m.previewContent)
 	}
-	if m.showPreview {
+	// Don't kick off a normal preview load while save/restore confirmation owns
+	// the pane — its content would get overwritten when the load completes.
+	if m.showPreview && !m.savePreviewMode && !m.restorePreviewMode {
 		switch item := m.list.SelectedItem().(type) {
 		case sessionItem:
 			return m.loadPreviewForItem(item)
@@ -96,6 +155,8 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 		dormant := dormantWorktrees(unique, group.tmuxNames)
 		if len(dormant) == 0 {
 			*m.expandedGroup = repoName
+			// Shrink list to make room for the in-box hint line.
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
 			return m, nil
 		}
 	}
@@ -111,12 +172,36 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
 	// height (filter input vs title). Force recalculation to prevent 1-line jump.
-	m.list.SetSize(m.list.Width(), m.list.Height())
+	// Also shrink by 1 row to reserve space for the in-box hint line.
+	m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
-	// Find cursor target: first newly-revealed item from this group.
-	// For active groups: first dormant (non-tmux) child after the badge carrier.
-	// For dormant-only groups: first child after the group header.
+	// Find cursor target. Preference order, so expanding lands on the most
+	// useful child instead of the badge carrier (which is the parent-summary row):
+	//   1. dormant child whose branch matches the active tmux session
+	//   2. dormant child whose branch matches the user's default for this repo
+	//   3. first non-bare-root dormant child
+	//   4. first dormant child (bare root only as last resort)
+	//   5. badge carrier
 	targetIndex := 0
+	badgeCarrierIndex := -1
+	activeBranch := ""
+	if group != nil {
+		for name := range group.tmuxNames {
+			if idx := strings.LastIndex(name, "/"); idx >= 0 {
+				activeBranch = name[idx+1:]
+				break
+			}
+		}
+	}
+	defaultBranch := ""
+	if m.worktreeDefaults != nil {
+		defaultBranch = (*m.worktreeDefaults)[repoName]
+	}
+
+	matchActiveIdx := -1
+	matchDefaultIdx := -1
+	firstNonBareIdx := -1
+	firstDormantIdx := -1
 	foundBadgeOrHeader := false
 	for i, listItem := range displayItems {
 		switch v := listItem.(type) {
@@ -126,29 +211,49 @@ func (m Model) expandGroup(repoName string) (Model, tea.Cmd) {
 			}
 		case sessionItem:
 			if v.groupRepo == repoName {
-				// This is the badge carrier — dormant items follow it
+				if badgeCarrierIndex == -1 {
+					badgeCarrierIndex = i
+				}
 				foundBadgeOrHeader = true
 				continue
 			}
-			if foundBadgeOrHeader {
-				// Match worktree items belonging to this group (works for both package-first and branch-first)
-				itemKey := groupKeyForItem(v.session.Name, v.session.Src, m.workspacePrefixes, m.groupMode)
-				if itemKey == repoName || v.session.Name == repoName {
-					targetIndex = i
-					goto found
-				}
+			if !foundBadgeOrHeader || !v.groupChild {
+				continue
 			}
-			// For active groups with no dormant: target first active item
-			if group != nil && !foundBadgeOrHeader && strings.Contains(v.session.Name, "/") {
-				itemKey := groupKeyForItem(v.session.Name, v.session.Src, m.workspacePrefixes, m.groupMode)
-				if itemKey == repoName && !group.tmuxNames[v.session.Name] {
-					targetIndex = i
-					goto found
-				}
+			itemKey := groupKeyForItem(v.session.Name, v.session.Src, m.workspacePrefixes, m.groupMode)
+			if itemKey != repoName && v.session.Name != repoName {
+				continue
+			}
+			if firstDormantIdx == -1 {
+				firstDormantIdx = i
+			}
+			if !v.bareRoot && firstNonBareIdx == -1 {
+				firstNonBareIdx = i
+			}
+			branch := ""
+			if idx := strings.LastIndex(v.session.Name, "/"); idx >= 0 {
+				branch = v.session.Name[idx+1:]
+			}
+			if activeBranch != "" && branch == activeBranch && matchActiveIdx == -1 {
+				matchActiveIdx = i
+			}
+			if defaultBranch != "" && branch == defaultBranch && matchDefaultIdx == -1 {
+				matchDefaultIdx = i
 			}
 		}
 	}
-found:
+	switch {
+	case matchActiveIdx >= 0:
+		targetIndex = matchActiveIdx
+	case matchDefaultIdx >= 0:
+		targetIndex = matchDefaultIdx
+	case firstNonBareIdx >= 0:
+		targetIndex = firstNonBareIdx
+	case firstDormantIdx >= 0:
+		targetIndex = firstDormantIdx
+	case badgeCarrierIndex >= 0:
+		targetIndex = badgeCarrierIndex
+	}
 	logDebug("DEBUG expandGroup: repoName=%s targetIndex=%d totalItems=%d", repoName, targetIndex, len(displayItems))
 	m.list.Select(targetIndex)
 
@@ -174,6 +279,8 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 		dormant := dormantWorktrees(unique, group.tmuxNames)
 		if len(dormant) == 0 {
 			*m.expandedGroup = ""
+			// Restore full height now that the in-box hint is gone.
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
 			return m, nil
 		}
 	}
@@ -189,7 +296,8 @@ func (m Model) collapseGroup() (Model, tea.Cmd) {
 	m.list.SetFilterState(list.Filtering)
 	// SetFilterState doesn't call updatePagination(), but it changes titleView()
 	// height (filter input vs title). Force recalculation to prevent 1-line jump.
-	m.list.SetSize(m.list.Width(), m.list.Height())
+	// Restore full height now that the in-box hint is gone.
+	m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 	// Find the group item or badged session to position cursor on
 	targetIndex := 0
@@ -245,7 +353,7 @@ func (m Model) enterWorkspaceManager() (Model, tea.Cmd) {
 	m.list.Filter = list.DefaultFilter
 	m.list.SetFilterText("")
 	m.list.SetFilterState(list.Filtering)
-	m.list.SetSize(m.list.Width(), m.list.Height())
+	m.list.SetSize(m.list.Width(), m.listInnerHeight())
 	m.list.Title = "📦 Workspace Manager"
 	m.list.Select(0)
 
@@ -321,7 +429,7 @@ func (m Model) toggleWorkspaceItem() (Model, tea.Cmd) {
 	m.list.Filter = list.DefaultFilter
 	m.list.SetFilterText(filterText)
 	m.list.SetFilterState(list.Filtering)
-	m.list.SetSize(m.list.Width(), m.list.Height())
+	m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 	// Restore cursor position
 	if cursorIndex >= len(m.list.VisibleItems()) {
@@ -465,7 +573,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		styles := list.DefaultStyles(m.isDark)
 		styles.Title = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("170")).
+			Foreground(lipgloss.Color("#5f875f")).
 			MarginBottom(1).
 			MarginLeft(2)
 		m.list.Styles = styles
@@ -477,6 +585,111 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 		return m, cmd
+
+	case applyRestoreStateMsg:
+		// Rehydrate state after a kill-and-relaunch toggle. See state_restore.go.
+		// showPreview was already set in newModel; here we restore filter text,
+		// cursor position, and trigger any pending save/restore action.
+		if m.pendingRestore == nil {
+			return m, nil
+		}
+		rs := m.pendingRestore
+		m.pendingRestore = nil
+
+		// Enter filter mode via the list's own '/' handler so the filter input
+		// gets focused properly. Must happen BEFORE SetFilterText — otherwise
+		// if we set text first, the '/' would be appended as a literal char.
+		var listCmd tea.Cmd
+		m.list, listCmd = m.list.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+
+		// Mirror the "empty → non-empty" transition that happens when the user
+		// starts typing: swap to full item set for fuzzy search, then apply text.
+		// Without this swap, SetFilterText alone doesn't trigger filter evaluation
+		// (items show but aren't filtered).
+		if rs.Filter != "" {
+			*m.expandedGroup = ""
+			m.list.Filter = seshFilter(m.allItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
+			m.list.SetItems(m.allItems)
+			m.list.SetFilterText(rs.Filter)
+			m.list.SetFilterState(list.Filtering)
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
+			m.lastFilter = rs.Filter
+		}
+
+		// Prefer to re-select by session name (stable across filter evaluation).
+		// Fall back to cursor index, clamped to visible range.
+		targetIndex := rs.Cursor
+		if rs.SessionName != "" {
+			for i, listItem := range m.list.VisibleItems() {
+				switch v := listItem.(type) {
+				case sessionItem:
+					if v.session.Name == rs.SessionName {
+						targetIndex = i
+					}
+				case worktreeGroupItem:
+					if v.repoName == rs.SessionName {
+						targetIndex = i
+					}
+				}
+			}
+		}
+		visibleCount := len(m.list.VisibleItems())
+		if visibleCount == 0 {
+			targetIndex = 0
+		} else if targetIndex >= visibleCount {
+			targetIndex = visibleCount - 1
+		} else if targetIndex < 0 {
+			targetIndex = 0
+		}
+		m.list.Select(targetIndex)
+
+		cmds := []tea.Cmd{}
+		if listCmd != nil {
+			cmds = append(cmds, listCmd)
+		}
+		// Load preview for the restored item when preview is on — but NOT when
+		// a save/restore action is pending, because that async load would arrive
+		// later and clobber the save/restore confirmation content.
+		if m.showPreview && rs.PendingAction == "" {
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				var previewCmd tea.Cmd
+				m, previewCmd = m.loadPreviewForItem(item)
+				if previewCmd != nil {
+					cmds = append(cmds, previewCmd)
+				}
+			case worktreeGroupItem:
+				if rep, ok := representativeSession(item); ok {
+					var previewCmd tea.Cmd
+					m, previewCmd = m.loadPreviewForItem(rep)
+					if previewCmd != nil {
+						cmds = append(cmds, previewCmd)
+					}
+				}
+			}
+		}
+
+		// If the relaunch was triggered by ctrl+s / ctrl+r from compact mode,
+		// land directly in the save/restore confirmation.
+		switch rs.PendingAction {
+		case pendingActionSave:
+			// Save doesn't depend on savedState — fire immediately.
+			if item, ok := m.list.SelectedItem().(sessionItem); ok && item.session.Src == "tmux" {
+				var saveM Model
+				var saveCmd tea.Cmd
+				saveM, saveCmd = m.enterSavePreview(item.session.Name)
+				m = saveM
+				if saveCmd != nil {
+					cmds = append(cmds, saveCmd)
+				}
+			}
+		case pendingActionRestore:
+			// savedState is loaded async via SavedStateMsg — it's almost certainly
+			// empty here on a fresh launch. Defer until that message arrives.
+			m.deferredRestore = true
+		}
+
+		return m, tea.Batch(cmds...)
 
 	case SessionsLoadedMsg:
 		// Build new list items from loaded sessions
@@ -523,7 +736,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastFilter = msg.PreserveFilterText
 			m.list.SetFilterText(msg.PreserveFilterText)
 			m.list.SetFilterState(list.Filtering)
-			m.list.SetSize(m.list.Width(), m.list.Height())
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 			// Clamp cursor to valid range
 			targetIndex := msg.PreserveCursorIndex
@@ -581,8 +794,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
-		// Discard late-arriving previews when preview is hidden or during restore confirmation
-		if !m.showPreview || m.restorePreviewMode {
+		// Discard late-arriving previews when preview is hidden or during
+		// save/restore confirmation (their content owns the preview pane).
+		if !m.showPreview || m.restorePreviewMode || m.savePreviewMode {
 			return m, nil
 		}
 		logDebug("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
@@ -631,6 +845,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for k, v := range msg.Sessions {
 			(*m.savedState)[k] = v
+		}
+		// If a compact-mode ctrl+r relaunch is waiting on savedState to load,
+		// trigger the restore confirmation now that we know which session has state.
+		if m.deferredRestore {
+			m.deferredRestore = false
+			var targetName string
+			switch item := m.list.SelectedItem().(type) {
+			case sessionItem:
+				if (*m.savedState)[item.sanitizedName] {
+					targetName = item.session.Name
+				}
+			case worktreeGroupItem:
+				for _, wt := range item.worktrees {
+					if (*m.savedState)[wt.sanitizedName] {
+						targetName = wt.session.Name
+						break
+					}
+				}
+			}
+			if targetName != "" {
+				return m.enterRestorePreview(targetName)
+			}
 		}
 		return m, nil
 
@@ -985,12 +1221,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				if (*m.savedState)[item.sanitizedName] {
+					// In compact mode the confirmation has nowhere to render
+					// (it lives in the preview pane). Auto-expand into wide mode
+					// and land directly in the restore flow.
+					if !m.showPreview {
+						return m.toggleAndRelaunch(pendingActionRestore)
+					}
 					return m.enterRestorePreview(item.session.Name)
 				}
 			case worktreeGroupItem:
 				// Check if any session in the group has saved state
 				for _, wt := range item.worktrees {
 					if (*m.savedState)[wt.sanitizedName] {
+						if !m.showPreview {
+							return m.toggleAndRelaunch(pendingActionRestore)
+						}
 						return m.enterRestorePreview(wt.session.Name)
 					}
 				}
@@ -1002,6 +1247,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, m.keys.SaveSession) {
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {
 				if item.session.Src == "tmux" {
+					// Confirmation UI lives in the preview pane — auto-expand first.
+					if !m.showPreview {
+						return m.toggleAndRelaunch(pendingActionSave)
+					}
 					return m.enterSavePreview(item.session.Name)
 				}
 				// Non-tmux session — show feedback
@@ -1147,7 +1396,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
-			m.list.SetSize(m.list.Width(), m.list.Height())
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 			// Find the previous session in the (now expanded) display items.
 			targetIndex := 0
@@ -1214,11 +1463,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.TogglePreview):
-			m.showPreview = !m.showPreview
-			if !m.showPreview {
-				m.cancelInflightPreview()
-			}
-			return m.applyLayout()
+			// Kill-and-relaunch toggle: tmux popups can't be resized in place,
+			// so we persist state, ask tmux to queue a new popup at the opposite
+			// size, and exit. See state_restore.go for the mechanism.
+			return m.toggleAndRelaunch("")
 
 		case key.Matches(msg, m.keys.Delete):
 			// Delete session if it's a tmux session
@@ -1315,7 +1563,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 			m.list.SetFilterText("")
 			m.list.SetFilterState(list.Filtering)
-			m.list.SetSize(m.list.Width(), m.list.Height())
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 			// Restore cursor position (clamped to new item count)
 			if cursorIndex >= len(displayItems) {
@@ -1387,7 +1635,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.SetFilterState(list.Filtering)
 			// SetFilterState doesn't call updatePagination(), but it changes titleView()
 			// height (filter input vs title). Force recalculation to prevent 1-line jump.
-			m.list.SetSize(m.list.Width(), m.list.Height())
+			m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 			m.list.Select(targetIndex)
 
@@ -1454,7 +1702,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.Filter = seshFilter(displayItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
 				m.list.SetFilterText("")
 				m.list.SetFilterState(list.Filtering)
-				m.list.SetSize(m.list.Width(), m.list.Height())
+				m.list.SetSize(m.list.Width(), m.listInnerHeight())
 
 				m.list.Select(0)
 				if m.showPreview {

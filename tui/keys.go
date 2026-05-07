@@ -67,8 +67,8 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("tab", "expand/collapse group"),
 	),
 	SetDefault: key.NewBinding(
-		key.WithKeys("ctrl+p"),
-		key.WithHelp("ctrl+p", "set default worktree"),
+		key.WithKeys("ctrl+f"),
+		key.WithHelp("ctrl+f", "set default worktree"),
 	),
 	RepoFocus: key.NewBinding(
 		key.WithKeys("ctrl+t"),
@@ -103,7 +103,7 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("ctrl+a", "restore all sessions"),
 	),
 	TogglePreview: key.NewBinding(
-		key.WithKeys("ctrl+f"),
-		key.WithHelp("ctrl+f", "toggle preview"),
+		key.WithKeys("ctrl+p"),
+		key.WithHelp("ctrl+p", "toggle preview"),
 	),
 }

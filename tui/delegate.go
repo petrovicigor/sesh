@@ -13,7 +13,7 @@ import (
 
 // Cached styles to avoid per-item allocations during rendering
 var (
-	selectedItemStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
+	selectedItemStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#5f875f"))
 	filterDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
 	dimRepoStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	badgeStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
@@ -21,7 +21,7 @@ var (
 
 	// Pre-rendered strings (computed once at init, never re-rendered)
 	nodeIndicatorStr = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(" ⬢")
-	defaultStarStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("★")
+	defaultStarStr   = lipgloss.NewStyle().Foreground(lipgloss.Color("#e4c47a")).Render("★")
 	treeMidStr       = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("│")
 	treeEndStr       = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("└")
 	bareRootStr      = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(bare root)")
