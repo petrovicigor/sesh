@@ -732,12 +732,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SessionKilledMsg:
+		// Reload even on error: kill-session commonly returns exit 1 when the
+		// session was already destroyed by GracefulPaneCleanup's SIGTERM to
+		// the last nvim pane. Skipping the reload leaves a ghost row in the
+		// picker until something else triggers a refresh.
 		if msg.Err != nil {
-			logDebug("DEBUG ctrl+d: kill error: %v", msg.Err)
-			return m, nil
+			logDebug("DEBUG ctrl+d: kill error: %v (reloading anyway)", msg.Err)
+		} else {
+			logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
 		}
 		*m.expandedGroup = ""
-		logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
 		return m, loadSessionsPreservingState(m.lister, m.currentFilter, m.pendingDeleteFilterText, m.pendingDeleteCursorIndex)
 
 	case DefaultsSavedMsg:
