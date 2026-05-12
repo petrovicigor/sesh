@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -168,11 +169,19 @@ func countNonEmptyLines(s string) int {
 
 // savedStateData holds parsed data from a tmux-session-saver JSON file.
 type savedStateData struct {
-	savedAt      string
-	windowNames  []string
-	windowCount  int
-	processCount int
-	claudeCount  int
+	savedAt     string
+	windows     []savedWindowInfo
+	windowCount int
+}
+
+// savedWindowInfo is per-window data extracted from the saved state file,
+// used to annotate window names in the preview with `(claude)` /
+// `(npm run dev)` markers so the user can see what each window will
+// actually restore to.
+type savedWindowInfo struct {
+	name           string
+	hasClaude      bool
+	processCommand string // empty if no long-running process captured
 }
 
 // sanitizeReplacer is shared across all SanitizeSessionName calls to avoid per-call allocation.
@@ -185,8 +194,27 @@ func SanitizeSessionName(name string) string {
 	return sanitizeReplacer.Replace(name)
 }
 
+// rawSavedFile is the minimal schema needed to extract per-window info
+// from a tmux-session-saver JSON file. Mirrors the shape of
+// internal/state.SessionState; only fields we render are decoded.
+type rawSavedFile struct {
+	SavedAt string `json:"saved_at"`
+	Windows []struct {
+		Name  string `json:"name"`
+		Panes []struct {
+			Process *struct {
+				Command     string `json:"command"`
+				LongRunning bool   `json:"long_running"`
+			} `json:"process"`
+			ClaudeSession *struct {
+				Title string `json:"title"`
+			} `json:"claude_session"`
+		} `json:"panes"`
+	} `json:"windows"`
+}
+
 // parseSavedState reads and parses the tmux-session-saver JSON file for a session.
-// Returns nil if no saved state exists.
+// Returns nil if no saved state exists or the file is malformed.
 func parseSavedState(sessionName string) *savedStateData {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -198,58 +226,43 @@ func parseSavedState(sessionName string) *savedStateData {
 		return nil
 	}
 
-	content := string(data)
+	var raw rawSavedFile
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
 
-	// Count windows (windows have "layout" field, panes don't)
-	windowCount := strings.Count(content, `"layout":`)
+	// Normalise the saved_at timestamp: "2026-05-12T17:30:00.123+02:00" → "2026-05-12 17:30:00"
+	savedAt := raw.SavedAt
+	if tIdx := strings.Index(savedAt, "T"); tIdx >= 0 {
+		date := savedAt[:tIdx]
+		timePart := savedAt[tIdx+1:]
+		if dotIdx := strings.Index(timePart, "."); dotIdx >= 0 {
+			timePart = timePart[:dotIdx]
+		}
+		if plusIdx := strings.Index(timePart, "+"); plusIdx >= 0 {
+			timePart = timePart[:plusIdx]
+		}
+		savedAt = date + " " + timePart
+	}
 
-	// Extract saved_at timestamp
-	savedAt := ""
-	if idx := strings.Index(content, `"saved_at": "`); idx >= 0 {
-		start := idx + len(`"saved_at": "`)
-		if end := strings.Index(content[start:], `"`); end >= 0 {
-			savedAt = content[start : start+end]
-			if tIdx := strings.Index(savedAt, "T"); tIdx >= 0 {
-				date := savedAt[:tIdx]
-				timePart := savedAt[tIdx+1:]
-				if dotIdx := strings.Index(timePart, "."); dotIdx >= 0 {
-					timePart = timePart[:dotIdx]
-				}
-				if plusIdx := strings.Index(timePart, "+"); plusIdx >= 0 {
-					timePart = timePart[:plusIdx]
-				}
-				savedAt = date + " " + timePart
+	wins := make([]savedWindowInfo, 0, len(raw.Windows))
+	for _, w := range raw.Windows {
+		info := savedWindowInfo{name: w.Name}
+		for _, p := range w.Panes {
+			if p.ClaudeSession != nil {
+				info.hasClaude = true
+			}
+			if p.Process != nil && p.Process.LongRunning && info.processCommand == "" {
+				info.processCommand = p.Process.Command
 			}
 		}
-	}
-
-	// Extract window names
-	var windowNames []string
-	remaining := content
-	for {
-		idx := strings.Index(remaining, `"name": "`)
-		if idx < 0 {
-			break
-		}
-		start := idx + len(`"name": "`)
-		end := strings.Index(remaining[start:], `"`)
-		if end < 0 {
-			break
-		}
-		name := remaining[start : start+end]
-		windowNames = append(windowNames, name)
-		remaining = remaining[start+end:]
-	}
-	if len(windowNames) > windowCount {
-		windowNames = windowNames[:windowCount]
+		wins = append(wins, info)
 	}
 
 	return &savedStateData{
-		savedAt:      savedAt,
-		windowNames:  windowNames,
-		windowCount:  windowCount,
-		processCount: strings.Count(content, `"long_running": true`),
-		claudeCount:  strings.Count(content, `"session_id": "`),
+		savedAt:     savedAt,
+		windows:     wins,
+		windowCount: len(wins),
 	}
 }
 
@@ -269,26 +282,36 @@ func getSavedStateInfo(sessionName string, isActive bool) string {
 		out.WriteString(fmt.Sprintf(" %ssaved %s%s\n", dim, sd.savedAt, colorReset))
 	}
 
-	for i, name := range sd.windowNames {
+	for i, w := range sd.windows {
+		name := w.name
 		if len(name) > 30 {
 			name = name[:27] + "..."
 		}
 		prefix := "├"
-		if i == len(sd.windowNames)-1 {
+		if i == len(sd.windows)-1 {
 			prefix = "└"
 		}
-		out.WriteString(fmt.Sprintf(" %s%s%s %s%s\n", dim, prefix, colorReset, name, colorReset))
-	}
-
-	if sd.processCount > 0 || sd.claudeCount > 0 {
-		var badges []string
-		if sd.processCount > 0 {
-			badges = append(badges, fmt.Sprintf("%d process", sd.processCount))
+		// Tag per window so the user can see WHAT each window will restore
+		// to (not just a count of how many sessions exist in aggregate):
+		//   "  · claude"            — pane runs claude --resume
+		//   "  · npm run dev"       — long-running captured process
+		//   (no tag)                — plain shell / editor
+		var tag string
+		switch {
+		case w.hasClaude:
+			tag = "  · claude"
+		case w.processCommand != "":
+			cmd := w.processCommand
+			if len(cmd) > 24 {
+				cmd = cmd[:21] + "..."
+			}
+			tag = "  · " + cmd
 		}
-		if sd.claudeCount > 0 {
-			badges = append(badges, fmt.Sprintf("%d claude", sd.claudeCount))
+		if tag != "" {
+			out.WriteString(fmt.Sprintf(" %s%s%s %s%s%s%s\n", dim, prefix, colorReset, name, dim, tag, colorReset))
+		} else {
+			out.WriteString(fmt.Sprintf(" %s%s%s %s%s\n", dim, prefix, colorReset, name, colorReset))
 		}
-		out.WriteString(fmt.Sprintf(" %s%s%s\n", dim, strings.Join(badges, ", "), colorReset))
 	}
 
 	return out.String()
