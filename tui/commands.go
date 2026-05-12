@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -150,7 +149,14 @@ func loadPreview(ctx context.Context, p previewer.Previewer, session model.SeshS
 		if !isActive {
 			cyan = colorCyanDim
 		}
-		content := fmt.Sprintf("%s📁 %s%s\n%s", cyan, path, colorReset, dirTree)
+		var saved string
+		if !isActive {
+			saved = getSavedStateInfo(session.Name, isActive)
+			if saved != "" {
+				saved += "\n"
+			}
+		}
+		content := fmt.Sprintf("%s📁 %s%s\n%s%s", cyan, path, colorReset, saved, dirTree)
 		return PreviewLoadedMsg{Content: content}
 	}
 }
@@ -222,9 +228,16 @@ func detectAllProcesses() tea.Cmd {
 	}
 }
 
+// savedStateFreshness is how recent a state file must be to qualify for the
+// (+) indicator. Stale snapshots are likely irrelevant — the daemon updates
+// every 30s, so anything older than this means the session hasn't been
+// touched in a day.
+const savedStateFreshness = 24 * time.Hour
+
 // checkSavedState scans ~/.local/share/tmux-session-saver/ for .json files.
-// Returns a map of sanitized session names that have saved state available for restore.
-// Keys are sanitized (/ and spaces → _) to match tmux-session-saver's filename convention.
+// Returns a map of sanitized session names that have a *recent* (≤ 24h)
+// saved state available for restore. Keys are sanitized (/ and spaces → _)
+// to match tmux-session-saver's filename convention.
 func checkSavedState() tea.Cmd {
 	return func() tea.Msg {
 		homeDir, err := os.UserHomeDir()
@@ -236,60 +249,27 @@ func checkSavedState() tea.Cmd {
 		if err != nil {
 			return SavedStateMsg{Sessions: nil}
 		}
+		cutoff := time.Now().Add(-savedStateFreshness)
 		sessions := make(map[string]bool)
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
 			name := entry.Name()
-			if strings.HasSuffix(name, ".json") {
-				sessions[strings.TrimSuffix(name, ".json")] = true
+			if !strings.HasSuffix(name, ".json") {
+				continue
 			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().Before(cutoff) {
+				continue
+			}
+			sessions[strings.TrimSuffix(name, ".json")] = true
 		}
 		return SavedStateMsg{Sessions: sessions}
 	}
-}
-
-// deleteSavedState removes the tmux-session-saver save file for a session.
-func deleteSavedState(sessionName string) tea.Cmd {
-	sanitized := SanitizeSessionName(sessionName)
-	return func() tea.Msg {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return SavedStateDeletedMsg{SessionName: sanitized, Err: err}
-		}
-		path := filepath.Join(homeDir, ".local", "share", "tmux-session-saver", sanitized+".json")
-		err = os.Remove(path)
-		return SavedStateDeletedMsg{SessionName: sanitized, Err: err}
-	}
-}
-
-// saveSessionState runs tmux-session-saver save for a tmux session.
-func saveSessionState(sessionName string) tea.Cmd {
-	return func() tea.Msg {
-		cmd := exec.Command("tmux-session-saver", "save", sessionName)
-		err := cmd.Run()
-		return SessionSavedMsg{SessionName: sessionName, Err: err}
-	}
-}
-
-// restoreSessionState runs tmux-session-saver restore for a tmux session.
-func restoreSessionState(sessionName string) tea.Cmd {
-	return func() tea.Msg {
-		cmd := exec.Command("tmux-session-saver", "restore", sessionName)
-		err := cmd.Run()
-		return SessionRestoredMsg{SessionName: sessionName, Err: err}
-	}
-}
-
-// getCurrentTmuxSession returns the name of the current tmux session.
-func getCurrentTmuxSession() string {
-	cmd := exec.Command("tmux", "display-message", "-p", "#S")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
 }
 
 // killSessionWithCleanup gracefully cleans up panes, kills the session, then cleans up orphans.

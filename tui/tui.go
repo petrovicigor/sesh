@@ -44,7 +44,7 @@ func NewTUI(
 	}
 }
 
-func (t *TUI) Run() (string, bool, error) {
+func (t *TUI) Run() (string, error) {
 	resetStartTime()
 	logDebug("Run() entered")
 
@@ -53,7 +53,7 @@ func (t *TUI) Run() (string, bool, error) {
 		HideDuplicates: true,
 	})
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	logDebug("lister.List() done (%d sessions)", len(sessions.OrderedIndex))
 
@@ -85,11 +85,11 @@ func (t *TUI) Run() (string, bool, error) {
 	flushDebugLog()
 
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	finalModel, ok := result.(Model)
 	if !ok {
-		return "", false, nil
+		return "", nil
 	}
-	return finalModel.selected, finalModel.restoreRequested, nil
+	return finalModel.selected, nil
 }

@@ -18,19 +18,14 @@ const (
 
 	// Env var the relaunched sesh process reads to rehydrate state.
 	restoreStateEnvVar = "SESH_RESTORE_STATE"
-
-	// Valid values for RestoreState.PendingAction.
-	pendingActionSave    = "save"
-	pendingActionRestore = "restore"
 )
 
 // RestoreState is the TUI state persisted across a kill-and-relaunch toggle.
 // Written to disk by ScheduleRelaunch and read by LoadRestoreState in the new process.
 type RestoreState struct {
-	Filter        string `json:"filter"`
-	Cursor        int    `json:"cursor"`
-	ShowPreview   bool   `json:"show_preview"`
-	PendingAction string `json:"pending_action,omitempty"`
+	Filter      string `json:"filter"`
+	Cursor      int    `json:"cursor"`
+	ShowPreview bool   `json:"show_preview"`
 	// SessionName is the selected session at toggle time. Used to re-select it
 	// after the list re-filters, since cursor index alone isn't stable across filters.
 	SessionName string `json:"session_name,omitempty"`

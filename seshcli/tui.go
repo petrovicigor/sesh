@@ -1,8 +1,6 @@
 package seshcli
 
 import (
-	"os/exec"
-
 	"github.com/spf13/cobra"
 
 	"github.com/joshmedeski/sesh/v2/connector"
@@ -29,7 +27,7 @@ func NewTuiCommand(
 		Short: "Interactive session picker (Bubble Tea TUI)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tuiInstance := tui.NewTUI(l, c, i, t, cfg, p, r)
-			selected, restoreRequested, err := tuiInstance.Run()
+			selected, err := tuiInstance.Run()
 			if err != nil {
 				return err
 			}
@@ -38,25 +36,11 @@ func NewTuiCommand(
 				return nil
 			}
 
-			// Connect to selected session
+			// Connect to selected session. Auto-restore happens via sesh's
+			// startup_command → `tmux-session-saver restore-or` for newly
+			// created sessions; no manual restore path here.
 			trimmedName := i.RemoveIcon(selected)
-
-			// Schedule restore BEFORE connect — Connect triggers tmux switch-client
-			// which closes the popup and kills this process. tmux run-shell -b
-			// runs in tmux's server process and survives popup closure.
-			// The delay ensures Connect has created the session first.
-			connectOpts := model.ConnectOpts{}
-			if restoreRequested {
-				// Skip startup command — restore will recreate all windows
-				connectOpts.Command = "true"
-				// Restore saved state, then delete the save file on success
-				sanitized := tui.SanitizeSessionName(trimmedName)
-				exec.Command("tmux", "run-shell", "-b",
-					"sleep 0.5 && tmux-session-saver restore '"+trimmedName+"'"+
-						" && rm -f \"$HOME/.local/share/tmux-session-saver/"+sanitized+".json\"").Run()
-			}
-
-			_, err = c.Connect(trimmedName, connectOpts)
+			_, err = c.Connect(trimmedName, model.ConnectOpts{})
 			return err
 		},
 	}

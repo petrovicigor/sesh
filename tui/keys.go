@@ -14,15 +14,10 @@ type KeyMap struct {
 	DetectProcesses  key.Binding
 	ExpandGroup      key.Binding
 	SetDefault       key.Binding
-	RepoFocus         key.Binding
-	WorkspaceManager  key.Binding
-	ToggleGroupMode   key.Binding
-	RestoreConnect    key.Binding
-	RestoreSession    key.Binding
-	SaveSession       key.Binding
-	SaveAll           key.Binding
-	RestoreAll        key.Binding
-	TogglePreview     key.Binding
+	RepoFocus        key.Binding
+	WorkspaceManager key.Binding
+	ToggleGroupMode  key.Binding
+	TogglePreview    key.Binding
 }
 
 var DefaultKeyMap = KeyMap{
@@ -82,26 +77,8 @@ var DefaultKeyMap = KeyMap{
 		key.WithKeys("ctrl+g"),
 		key.WithHelp("ctrl+g", "toggle group mode"),
 	),
-	RestoreConnect: key.NewBinding(
-		key.WithKeys("shift+enter"),
-		key.WithHelp("shift+enter", "restore & connect"),
-	),
-	RestoreSession: key.NewBinding(
-		key.WithKeys("ctrl+r"),
-		key.WithHelp("ctrl+r", "restore session"),
-	),
-	SaveSession: key.NewBinding(
-		key.WithKeys("ctrl+s"),
-		key.WithHelp("ctrl+s", "save session state"),
-	),
-	SaveAll: key.NewBinding(
-		key.WithKeys("ctrl+a"),
-		key.WithHelp("ctrl+a", "save all tmux sessions"),
-	),
-	RestoreAll: key.NewBinding(
-		key.WithKeys("ctrl+a"),
-		key.WithHelp("ctrl+a", "restore all sessions"),
-	),
+	// (Removed: RestoreConnect/RestoreSession/SaveSession/SaveAll/RestoreAll —
+	// autosave via daemon + tmux hooks + restore-or replaced manual flows.)
 	TogglePreview: key.NewBinding(
 		key.WithKeys("ctrl+p"),
 		key.WithHelp("ctrl+p", "toggle preview"),

@@ -2,12 +2,8 @@ package tui
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -42,13 +38,10 @@ func (m *Model) cancelInflightPreview() {
 }
 
 // toggleAndRelaunch serializes current TUI state (filter text, selected session,
-// target preview flag, optional pending action), asks tmux to queue a new popup
-// at the opposite size via tmux run-shell -b, and exits. The queued popup opens
-// after the current one closes, and the new sesh process reads the state file.
-//
-// pendingAction is empty for a plain ctrl+p toggle, or "save" / "restore" when
-// auto-expanding from compact mode in response to ctrl+s / ctrl+r.
-func (m Model) toggleAndRelaunch(pendingAction string) (Model, tea.Cmd) {
+// target preview flag), asks tmux to queue a new popup at the opposite size
+// via tmux run-shell -b, and exits. The queued popup opens after the current
+// one closes, and the new sesh process reads the state file.
+func (m Model) toggleAndRelaunch() (Model, tea.Cmd) {
 	var sessionName string
 	switch item := m.list.SelectedItem().(type) {
 	case sessionItem:
@@ -62,16 +55,10 @@ func (m Model) toggleAndRelaunch(pendingAction string) (Model, tea.Cmd) {
 	}
 
 	state := RestoreState{
-		Filter:        m.list.FilterValue(),
-		Cursor:        m.list.Index(),
-		ShowPreview:   !m.showPreview,
-		PendingAction: pendingAction,
-		SessionName:   sessionName,
-	}
-	// If this is an auto-expand triggered by save/restore, force preview on
-	// regardless of current state — the action's UI needs the preview pane.
-	if pendingAction != "" {
-		state.ShowPreview = true
+		Filter:      m.list.FilterValue(),
+		Cursor:      m.list.Index(),
+		ShowPreview: !m.showPreview,
+		SessionName: sessionName,
 	}
 
 	if err := ScheduleRelaunch(state); err != nil {
@@ -113,9 +100,7 @@ func (m Model) applyLayout() (Model, tea.Cmd) {
 	if m.showPreview && m.previewContent != "" {
 		m.previewPort.SetContent(m.previewContent)
 	}
-	// Don't kick off a normal preview load while save/restore confirmation owns
-	// the pane — its content would get overwritten when the load completes.
-	if m.showPreview && !m.savePreviewMode && !m.restorePreviewMode {
+	if m.showPreview {
 		switch item := m.list.SelectedItem().(type) {
 		case sessionItem:
 			return m.loadPreviewForItem(item)
@@ -481,84 +466,6 @@ func buildWorkspaceToggleItems(subProjects map[string][]string, excludes map[str
 	return items
 }
 
-// enterRestorePreview enters restore preview mode, showing saved state details in the preview pane.
-func (m Model) enterRestorePreview(sessionName string) (Model, tea.Cmd) {
-	m.restorePreviewMode = true
-	m.deleteConfirmPending = false
-	m.restorePreviewSession = sessionName
-	m.restoreAllSessions = nil
-	m.restoreAllCompleted = nil
-	m.restoreAllCurrentSession = ""
-	content := generateRestorePreview(sessionName, len(*m.savedState))
-	m.previewContent = content
-	m.previewPort.SetContent(content)
-	m.previewPort.GotoTop()
-	return m, nil
-}
-
-// exitRestorePreview exits restore preview mode and reloads the normal preview.
-func (m Model) exitRestorePreview() (Model, tea.Cmd) {
-	m.restorePreviewMode = false
-	m.deleteConfirmPending = false
-	m.restorePreviewSession = ""
-	m.restoreAllSessions = nil
-	m.restoreAllCompleted = nil
-	m.restoreAllCurrentSession = ""
-	// Reload normal preview for currently selected item
-	if m.showPreview {
-		if item, ok := m.list.SelectedItem().(sessionItem); ok {
-			m.previewPort.SetContent("")
-			return m, loadPreview(context.Background(), m.previewer, item.session)
-		}
-	}
-	m.previewPort.SetContent("")
-	m.previewContent = ""
-	return m, nil
-}
-
-// tmuxSessionNames returns the names of all active tmux sessions from allItems.
-func (m Model) tmuxSessionNames() []string {
-	var names []string
-	for _, item := range m.allItems {
-		if si, ok := item.(sessionItem); ok && si.session.Src == "tmux" {
-			names = append(names, si.session.Name)
-		}
-	}
-	return names
-}
-
-// enterSavePreview enters save preview mode, showing save confirmation in the preview pane.
-func (m Model) enterSavePreview(sessionName string) (Model, tea.Cmd) {
-	m.savePreviewMode = true
-	m.savePreviewSession = sessionName
-	m.saveAllSessions = nil
-	m.saveAllCompleted = nil
-	tmuxNames := m.tmuxSessionNames()
-	content := generateSavePreview(sessionName, tmuxNames)
-	m.previewContent = content
-	m.previewPort.SetContent(content)
-	m.previewPort.GotoTop()
-	return m, nil
-}
-
-// exitSavePreview exits save preview mode and reloads the normal preview.
-func (m Model) exitSavePreview() (Model, tea.Cmd) {
-	m.savePreviewMode = false
-	m.savePreviewSession = ""
-	m.saveAllSessions = nil
-	m.saveAllCompleted = nil
-	// Reload normal preview for currently selected item
-	if m.showPreview {
-		if item, ok := m.list.SelectedItem().(sessionItem); ok {
-			m.previewPort.SetContent("")
-			return m, loadPreview(context.Background(), m.previewer,item.session)
-		}
-	}
-	m.previewPort.SetContent("")
-	m.previewContent = ""
-	return m, nil
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -647,10 +554,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if listCmd != nil {
 			cmds = append(cmds, listCmd)
 		}
-		// Load preview for the restored item when preview is on — but NOT when
-		// a save/restore action is pending, because that async load would arrive
-		// later and clobber the save/restore confirmation content.
-		if m.showPreview && rs.PendingAction == "" {
+		// Load preview for the restored item when preview is on.
+		if m.showPreview {
 			switch item := m.list.SelectedItem().(type) {
 			case sessionItem:
 				var previewCmd tea.Cmd
@@ -667,26 +572,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		}
-
-		// If the relaunch was triggered by ctrl+s / ctrl+r from compact mode,
-		// land directly in the save/restore confirmation.
-		switch rs.PendingAction {
-		case pendingActionSave:
-			// Save doesn't depend on savedState — fire immediately.
-			if item, ok := m.list.SelectedItem().(sessionItem); ok && item.session.Src == "tmux" {
-				var saveM Model
-				var saveCmd tea.Cmd
-				saveM, saveCmd = m.enterSavePreview(item.session.Name)
-				m = saveM
-				if saveCmd != nil {
-					cmds = append(cmds, saveCmd)
-				}
-			}
-		case pendingActionRestore:
-			// savedState is loaded async via SavedStateMsg — it's almost certainly
-			// empty here on a fresh launch. Defer until that message arrives.
-			m.deferredRestore = true
 		}
 
 		return m, tea.Batch(cmds...)
@@ -794,9 +679,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(previewCmd, filterCmd)
 
 	case PreviewLoadedMsg:
-		// Discard late-arriving previews when preview is hidden or during
-		// save/restore confirmation (their content owns the preview pane).
-		if !m.showPreview || m.restorePreviewMode || m.savePreviewMode {
+		if !m.showPreview {
 			return m, nil
 		}
 		logDebug("PreviewLoadedMsg received (%d bytes)", len(msg.Content))
@@ -846,28 +729,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for k, v := range msg.Sessions {
 			(*m.savedState)[k] = v
 		}
-		// If a compact-mode ctrl+r relaunch is waiting on savedState to load,
-		// trigger the restore confirmation now that we know which session has state.
-		if m.deferredRestore {
-			m.deferredRestore = false
-			var targetName string
-			switch item := m.list.SelectedItem().(type) {
-			case sessionItem:
-				if (*m.savedState)[item.sanitizedName] {
-					targetName = item.session.Name
-				}
-			case worktreeGroupItem:
-				for _, wt := range item.worktrees {
-					if (*m.savedState)[wt.sanitizedName] {
-						targetName = wt.session.Name
-						break
-					}
-				}
-			}
-			if targetName != "" {
-				return m.enterRestorePreview(targetName)
-			}
-		}
 		return m, nil
 
 	case SessionKilledMsg:
@@ -878,194 +739,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		*m.expandedGroup = ""
 		logDebug("DEBUG ctrl+d: killed ok, reloading with preserved state")
 		return m, loadSessionsPreservingState(m.lister, m.currentFilter, m.pendingDeleteFilterText, m.pendingDeleteCursorIndex)
-
-	case SavedStateDeletedMsg:
-		if msg.Err != nil {
-			logDebug("DEBUG: Failed to delete saved state for %s: %v", msg.SessionName, msg.Err)
-		} else {
-			delete(*m.savedState, msg.SessionName)
-		}
-		// Exit restore preview since the saved state is gone
-		if m.restorePreviewMode {
-			return m.exitRestorePreview()
-		}
-		return m, nil
-
-	case SessionSavedMsg:
-		if msg.Err != nil {
-			logDebug("DEBUG: Failed to save session state for %s: %v", msg.SessionName, msg.Err)
-		} else {
-			(*m.savedState)[SanitizeSessionName(msg.SessionName)] = true
-		}
-
-		// Save-all mode: track progress and save next session
-		if m.savePreviewMode && m.saveAllSessions != nil {
-			m.saveAllCompleted = append(m.saveAllCompleted, msg.SessionName)
-			content := generateSaveAllProgress(m.saveAllSessions, m.saveAllCompleted)
-			m.previewContent = content
-			m.previewPort.SetContent(content)
-			m.previewPort.GotoTop()
-
-			// If all done, show completion and exit after delay
-			if len(m.saveAllCompleted) >= len(m.saveAllSessions) {
-				m.statusMessage = fmt.Sprintf("💾 saved %d/%d sessions", len(m.saveAllCompleted), len(m.saveAllSessions))
-				return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-					return SaveAllNextMsg{} // reuse to trigger exit
-				})
-			}
-
-			// Save the next session
-			nextIdx := len(m.saveAllCompleted)
-			return m, saveSessionState(m.saveAllSessions[nextIdx])
-		}
-
-		// Single save mode: show result and exit save preview
-		if m.savePreviewMode {
-			if msg.Err != nil {
-				m.statusMessage = "save failed: " + msg.Err.Error()
-			} else {
-				m.statusMessage = "💾 saved " + msg.SessionName
-			}
-			m.savePreviewMode = false
-			m.savePreviewSession = ""
-			// Reload normal preview
-			if m.showPreview {
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
-					m.previewPort.SetContent("")
-					return m, tea.Batch(
-						loadPreview(context.Background(), m.previewer,item.session),
-						tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
-					)
-				}
-			}
-			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
-		}
-
-		// Not in save preview mode (shouldn't normally happen, but handle gracefully)
-		if msg.Err != nil {
-			m.statusMessage = "save failed: " + msg.Err.Error()
-		} else {
-			m.statusMessage = "💾 saved " + msg.SessionName
-		}
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return clearStatusMsg{}
-		})
-
-	case SaveAllNextMsg:
-		// Save-all completed — exit save preview and show status
-		if m.savePreviewMode {
-			m.savePreviewMode = false
-			m.savePreviewSession = ""
-			m.saveAllSessions = nil
-			m.saveAllCompleted = nil
-			if m.showPreview {
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
-					m.previewPort.SetContent("")
-					return m, tea.Batch(
-						loadPreview(context.Background(), m.previewer, item.session),
-						tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
-					)
-				}
-			}
-			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
-		}
-		return m, nil
-
-	case SessionRestoredMsg:
-		if msg.Err != nil {
-			logDebug("DEBUG: Failed to restore session %s: %v", msg.SessionName, msg.Err)
-		} else {
-			// Delete save file after successful restore
-			sanitized := SanitizeSessionName(msg.SessionName)
-			homeDir, _ := os.UserHomeDir()
-			if homeDir != "" {
-				os.Remove(filepath.Join(homeDir, ".local", "share", "tmux-session-saver", sanitized+".json"))
-			}
-			delete(*m.savedState, sanitized)
-		}
-
-		// Restore-all mode: track progress and restore next session
-		if m.restorePreviewMode && m.restoreAllSessions != nil {
-			m.restoreAllCompleted = append(m.restoreAllCompleted, msg.SessionName)
-			content := generateRestoreAllProgress(m.restoreAllSessions, m.restoreAllCompleted, m.restoreAllCurrentSession)
-			m.previewContent = content
-			m.previewPort.SetContent(content)
-			m.previewPort.GotoTop()
-
-			// Find next non-current session to restore
-			nextIdx := -1
-			completedSet := make(map[string]bool, len(m.restoreAllCompleted))
-			for _, name := range m.restoreAllCompleted {
-				completedSet[name] = true
-			}
-			for i, name := range m.restoreAllSessions {
-				if name == m.restoreAllCurrentSession {
-					continue
-				}
-				if !completedSet[name] {
-					nextIdx = i
-					break
-				}
-			}
-
-			if nextIdx >= 0 {
-				// Restore next session
-				return m, restoreSessionState(m.restoreAllSessions[nextIdx])
-			}
-
-			// All non-current sessions done — check if current session needs restore
-			if m.restoreAllCurrentSession != "" {
-				// Delay then exit via RestoreAllNextMsg to trigger current session restore
-				m.statusMessage = fmt.Sprintf("restored %d sessions, switching to restore current...",
-					len(m.restoreAllCompleted))
-				return m, tea.Tick(1000*time.Millisecond, func(time.Time) tea.Msg {
-					return RestoreAllNextMsg{}
-				})
-			}
-
-			// No current session to restore — just exit
-			m.statusMessage = fmt.Sprintf("restored %d sessions", len(m.restoreAllCompleted))
-			return m, tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-				return RestoreAllNextMsg{}
-			})
-		}
-
-		return m, nil
-
-	case RestoreAllNextMsg:
-		if m.restorePreviewMode && m.restoreAllSessions != nil {
-			// If current session has saved state, exit via single-restore flow
-			if m.restoreAllCurrentSession != "" {
-				m.selected = m.restoreAllCurrentSession
-				m.restoreRequested = true
-				m.restorePreviewMode = false
-				m.restoreAllSessions = nil
-				m.restoreAllCompleted = nil
-				return m, tea.Quit
-			}
-
-			// No current session to restore — exit restore preview
-			m.restorePreviewMode = false
-			m.restorePreviewSession = ""
-			m.restoreAllSessions = nil
-			m.restoreAllCompleted = nil
-			m.restoreAllCurrentSession = ""
-			if m.showPreview {
-				if item, ok := m.list.SelectedItem().(sessionItem); ok {
-					m.previewPort.SetContent("")
-					return m, tea.Batch(
-						loadPreview(context.Background(), m.previewer, item.session),
-						tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} }),
-					)
-				}
-			}
-			return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg { return clearStatusMsg{} })
-		}
-		return m, nil
-
-	case clearStatusMsg:
-		m.statusMessage = ""
-		return m, nil
 
 	case DefaultsSavedMsg:
 		if msg.Err != nil {
@@ -1080,112 +753,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		// Restore preview mode is fully modal
-		if m.restorePreviewMode {
-			// During restore-all, swallow everything (progress is automatic)
-			if m.restoreAllSessions != nil {
-				switch {
-				case msg.String() == "ctrl+c" || msg.String() == "ctrl+b":
-					return m, tea.Quit
-				default:
-					return m, nil
-				}
-			}
-
-			switch {
-			case key.Matches(msg, m.keys.Select): // Enter → confirm restore
-				m.selected = m.restorePreviewSession
-				m.restoreRequested = true
-				return m, tea.Quit
-			case key.Matches(msg, m.keys.RestoreAll): // Ctrl+A → restore all sessions with saved state
-				// Build list of sessions that have saved state
-				var sessionsToRestore []string
-				for _, item := range m.allItems {
-					if si, ok := item.(sessionItem); ok && si.session.Src == "tmux" {
-						if (*m.savedState)[si.sanitizedName] {
-							sessionsToRestore = append(sessionsToRestore, si.session.Name)
-						}
-					}
-				}
-				if len(sessionsToRestore) == 0 {
-					return m.exitRestorePreview()
-				}
-				// Detect current tmux session
-				m.restoreAllCurrentSession = getCurrentTmuxSession()
-				m.restoreAllSessions = sessionsToRestore
-				m.restoreAllCompleted = nil
-				content := generateRestoreAllProgress(sessionsToRestore, nil, m.restoreAllCurrentSession)
-				m.previewContent = content
-				m.previewPort.SetContent(content)
-				m.previewPort.GotoTop()
-				// Find first non-current session to restore
-				for _, name := range sessionsToRestore {
-					if name != m.restoreAllCurrentSession {
-						return m, restoreSessionState(name)
-					}
-				}
-				// Only current session has saved state — just do single restore
-				m.selected = m.restoreAllCurrentSession
-				m.restoreRequested = true
-				return m, tea.Quit
-			case msg.Code == tea.KeyBackspace: // Backspace → delete saved state
-				if m.deleteConfirmPending {
-					m.deleteConfirmPending = false
-					return m, deleteSavedState(m.restorePreviewSession)
-				}
-				m.deleteConfirmPending = true
-				content := generateDeleteConfirmPreview(m.restorePreviewSession)
-				m.previewContent = content
-				m.previewPort.SetContent(content)
-				m.previewPort.GotoTop()
-				return m, nil
-			case msg.Code == tea.KeyEscape: // Esc → cancel
-				m.deleteConfirmPending = false
-				return m.exitRestorePreview()
-			case msg.String() == "ctrl+c" || msg.String() == "ctrl+b": // hard quit
-				return m, tea.Quit
-			default:
-				return m, nil // swallow all other keys
-			}
-		}
-
-		// Save preview mode is fully modal — only Enter, Ctrl+A, Esc, Ctrl+C, Ctrl+B handled
-		if m.savePreviewMode {
-			// During save-all, swallow everything (progress is automatic)
-			if m.saveAllSessions != nil {
-				switch {
-				case msg.String() == "ctrl+c" || msg.String() == "ctrl+b":
-					return m, tea.Quit
-				default:
-					return m, nil
-				}
-			}
-
-			switch {
-			case key.Matches(msg, m.keys.Select): // Enter → save selected session
-				m.statusMessage = "saving " + m.savePreviewSession + "..."
-				return m, saveSessionState(m.savePreviewSession)
-			case key.Matches(msg, m.keys.SaveAll): // Ctrl+A → save all tmux sessions
-				tmuxNames := m.tmuxSessionNames()
-				if len(tmuxNames) == 0 {
-					return m.exitSavePreview()
-				}
-				m.saveAllSessions = tmuxNames
-				m.saveAllCompleted = nil
-				content := generateSaveAllProgress(tmuxNames, nil)
-				m.previewContent = content
-				m.previewPort.SetContent(content)
-				m.previewPort.GotoTop()
-				// Start saving the first session
-				return m, saveSessionState(tmuxNames[0])
-			case msg.Code == tea.KeyEscape: // Esc → cancel
-				return m.exitSavePreview()
-			case msg.String() == "ctrl+c" || msg.String() == "ctrl+b": // hard quit
-				return m, tea.Quit
-			default:
-				return m, nil // swallow all other keys
-			}
-		}
 
 		// Handle Ctrl+E for process detection
 		if key.Matches(msg, m.keys.DetectProcesses) {
@@ -1214,52 +781,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.toggleWorkspaceItem()
 			}
 			// Fall through to normal key handling (up/down, typing)
-		}
-
-		// Handle Shift+Enter or Ctrl+R: show restore preview (any session with saved state)
-		if key.Matches(msg, m.keys.RestoreConnect) || key.Matches(msg, m.keys.RestoreSession) {
-			switch item := m.list.SelectedItem().(type) {
-			case sessionItem:
-				if (*m.savedState)[item.sanitizedName] {
-					// In compact mode the confirmation has nowhere to render
-					// (it lives in the preview pane). Auto-expand into wide mode
-					// and land directly in the restore flow.
-					if !m.showPreview {
-						return m.toggleAndRelaunch(pendingActionRestore)
-					}
-					return m.enterRestorePreview(item.session.Name)
-				}
-			case worktreeGroupItem:
-				// Check if any session in the group has saved state
-				for _, wt := range item.worktrees {
-					if (*m.savedState)[wt.sanitizedName] {
-						if !m.showPreview {
-							return m.toggleAndRelaunch(pendingActionRestore)
-						}
-						return m.enterRestorePreview(wt.session.Name)
-					}
-				}
-			}
-			return m, nil
-		}
-
-		// Handle Ctrl+S: enter save preview mode for tmux sessions
-		if key.Matches(msg, m.keys.SaveSession) {
-			if item, ok := m.list.SelectedItem().(sessionItem); ok {
-				if item.session.Src == "tmux" {
-					// Confirmation UI lives in the preview pane — auto-expand first.
-					if !m.showPreview {
-						return m.toggleAndRelaunch(pendingActionSave)
-					}
-					return m.enterSavePreview(item.session.Name)
-				}
-				// Non-tmux session — show feedback
-				m.statusMessage = "ctrl+s saves tmux sessions only"
-				return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-					return clearStatusMsg{}
-				})
-			}
-			return m, nil
 		}
 
 		// Handle Tab for group expand/collapse
@@ -1466,7 +987,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Kill-and-relaunch toggle: tmux popups can't be resized in place,
 			// so we persist state, ask tmux to queue a new popup at the opposite
 			// size, and exit. See state_restore.go for the mechanism.
-			return m.toggleAndRelaunch("")
+			return m.toggleAndRelaunch()
 
 		case key.Matches(msg, m.keys.Delete):
 			// Delete session if it's a tmux session

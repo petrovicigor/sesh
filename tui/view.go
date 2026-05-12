@@ -90,23 +90,6 @@ func (m Model) View() tea.View {
 		columns = listStyle.Width(m.width).Render(listInner)
 	}
 
-	// Add status message below columns if present
-	if m.restorePreviewMode {
-		if m.restoreAllSessions != nil {
-			columns += "\n " + statusMsgStyle.Render("restoring all sessions...")
-		} else {
-			columns += "\n " + statusMsgStyle.Render("Enter restore | Ctrl+A restore all | Esc cancel")
-		}
-	} else if m.savePreviewMode {
-		if m.saveAllSessions != nil {
-			columns += "\n " + statusMsgStyle.Render("saving all sessions...")
-		} else {
-			columns += "\n " + statusMsgStyle.Render("Enter save | Ctrl+A save all | Esc cancel")
-		}
-	} else if m.statusMessage != "" {
-		columns += "\n " + statusMsgStyle.Render(m.statusMessage)
-	}
-
 	// Place within a fixed-size frame so every line is padded to full terminal width
 	// and empty lines are filled with spaces. Prevents underlying content bleed-through
 	// in bubbletea v2's diff-based renderer.

@@ -176,22 +176,10 @@ type Model struct {
 	groupMode         GroupMode                // current workspace grouping mode (package vs branch)
 	claudeAttention   *map[string]bool         // shared with delegate: tmux session name -> needs attention
 	savedState        *map[string]bool         // shared with delegate: session name -> has saved state
-	restoreRequested       bool   // true when user wants to restore saved state after connect
-	restorePreviewMode     bool   // true when showing restore confirmation in preview pane
-	restorePreviewSession  string // session name being confirmed for restore
-	deleteConfirmPending   bool   // true when waiting for second Backspace to confirm delete
-	savePreviewMode        bool   // true when showing save confirmation in preview pane
-	savePreviewSession     string // session name being confirmed for save
-	saveAllSessions        []string // tmux session names being saved in save-all mode
-	saveAllCompleted       []string // sessions that finished saving in save-all mode
-	restoreAllSessions       []string // sessions being restored in restore-all mode
-	restoreAllCompleted      []string // sessions that finished restoring in restore-all mode
-	restoreAllCurrentSession string   // current tmux session name (restored last via quit flow)
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
 	showPreview            bool   // true when preview pane is visible (toggled with ctrl+p)
 	isDark                 bool   // terminal dark mode (detected via BackgroundColorMsg)
-	statusMessage          string // transient status message (auto-clears after timeout)
 
 	previewCancel        context.CancelFunc       // cancels the in-flight preview load goroutine
 
@@ -204,11 +192,6 @@ type Model struct {
 	// Pending state from a kill-and-relaunch toggle. nil on normal launch.
 	// Consumed by Init() which fires applyRestoreStateMsg once.
 	pendingRestore *RestoreState
-
-	// Deferred restore confirmation: set when a relaunched sesh wants to enter
-	// restore preview but savedState hasn't loaded yet (it's populated async via
-	// SavedStateMsg). Cleared when that message arrives and the action fires.
-	deferredRestore bool
 }
 
 func newModel(
