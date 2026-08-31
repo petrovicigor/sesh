@@ -18,16 +18,18 @@ func miasmaBorder() color.Color {
 	return lipgloss.Color("#3a3328")
 }
 
+// Borderless boxes, like the claude-sessions picker: the popup floats on
+// tmux's native dim=X% backdrop, and background contrast is the elevation —
+// border lines just add noise. Horizontal padding of 2 keeps the width
+// chrome at 4 (what border+padding used to spend), so the -4 width
+// arithmetic in applyLayout is untouched; vertical chrome drops to 2 (see
+// the -2 there).
 var (
 	listStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(miasmaBorder()).
-			Padding(1)
+			Padding(1, 2)
 
 	previewStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(miasmaBorder()).
-			Padding(1)
+			Padding(1, 2)
 
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245")).

@@ -77,7 +77,7 @@ func (m Model) toggleAndRelaunch() (Model, tea.Cmd) {
 // listInnerHeight returns the list's inner content height, reserving two rows for
 // the blank spacer + hint line when a worktree group is expanded.
 func (m Model) listInnerHeight() int {
-	h := m.height - 4
+	h := m.height - 2 // borderless: top+bottom padding only
 	if m.expandedGroup != nil && *m.expandedGroup != "" {
 		h -= 2
 	}
@@ -93,7 +93,7 @@ func (m Model) applyLayout() (Model, tea.Cmd) {
 		previewBoxWidth := m.width - listBoxWidth
 		m.list.SetSize(listBoxWidth-4, listHeight)
 		m.previewPort.SetWidth(previewBoxWidth - 4)
-		m.previewPort.SetHeight(m.height - 4)
+		m.previewPort.SetHeight(m.height - 2)
 	} else {
 		m.list.SetSize(m.width-4, listHeight)
 	}
