@@ -14,6 +14,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
+	"github.com/joshmedeski/sesh/v2/scrim"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
@@ -193,6 +194,17 @@ type Model struct {
 	// Pending state from a kill-and-relaunch toggle. nil on normal launch.
 	// Consumed by Init() which fires applyRestoreStateMsg once.
 	pendingRestore *RestoreState
+
+	// Scrim mode: the tmux bind opened a FULL-CLIENT popup (`sesh tui --scrim
+	// <window-id>`) and the TUI draws its classic box (45% compact / 80% with
+	// preview, 75% tall) centered on a dimmed snapshot of the window behind
+	// it. width/height above become the BOX; screenW/screenH are the real
+	// popup dims. A direct `sesh tui` (the `t` alias, full-screen in a pane)
+	// keeps the plain full-size rendering — scrimMode stays false.
+	scrimMode bool
+	screenW   int
+	screenH   int
+	snap      *scrim.Snapshot // dimmed backdrop; nil composes a plain dim
 }
 
 func newModel(
@@ -208,6 +220,8 @@ func newModel(
 	frecencyScores map[string]float64,
 	excludesPath string,
 	restore *RestoreState,
+	scrimMode bool,
+	snap *scrim.Snapshot,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -258,6 +272,8 @@ func newModel(
 		sessions:         sessions,
 		width:            0,
 		height:           0,
+		scrimMode:        scrimMode,
+		snap:             snap,
 		showPreview:      initialShowPreview,
 		pendingRestore:   restore,
 		isDark:           true, // default until BackgroundColorMsg arrives

@@ -10,6 +10,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
 	"github.com/joshmedeski/sesh/v2/recent"
+	"github.com/joshmedeski/sesh/v2/scrim"
 	"github.com/joshmedeski/sesh/v2/state"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
@@ -44,9 +45,24 @@ func NewTUI(
 	}
 }
 
-func (t *TUI) Run() (string, error) {
+// Run starts the TUI. scrimTarget non-empty means scrim mode: the tmux bind
+// opened a full-window popup and passed #{window_id}; the UI renders as a
+// borderless panel over a dimmed capture of that window. Empty (a direct
+// `sesh tui`, full-screen in a pane) keeps the classic bordered rendering.
+func (t *TUI) Run(scrimTarget string) (string, error) {
 	resetStartTime()
 	logDebug("Run() entered")
+
+	scrimMode := scrimTarget != ""
+	var snap *scrim.Snapshot
+	if scrimMode {
+		var err error
+		if snap, err = scrim.Capture(scrimTarget); err != nil {
+			// Best-effort: a nil snapshot composes over a plain scrim.
+			logDebug("scrim capture failed: %v", err)
+			snap = nil
+		}
+	}
 
 	// Load sessions synchronously (fast: ~10-15ms parallel)
 	sessions, err := t.lister.List(lister.ListOptions{
@@ -74,7 +90,7 @@ func (t *TUI) Run() (string, error) {
 	// sesh process before it asked tmux to queue this popup.
 	restore, _ := LoadRestoreState()
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, restore)
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, restore, scrimMode, snap)
 	logDebug("newModel() done")
 
 	p := tea.NewProgram(m)
