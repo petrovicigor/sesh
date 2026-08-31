@@ -7,9 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
-
-	"github.com/joshmedeski/sesh/v2/scrim"
 )
 
 // miasmaBorder reads MIASMA_BORDER_FG (set by the tmux miasma theme) so popup
@@ -32,13 +29,6 @@ var (
 			BorderForeground(miasmaBorder()).
 			Padding(1)
 
-	// Scrim-mode column boxes: borderless (the raised panel against the
-	// dimmed backdrop replaces the border — OpenCode-style), horizontal
-	// chrome kept at 4 like the bordered pair so the width arithmetic in
-	// applyLayout holds for both; vertical chrome is boxChromeV's business.
-	scrimListStyle    = lipgloss.NewStyle().Padding(1, 2)
-	scrimPreviewStyle = lipgloss.NewStyle().Padding(1, 2)
-
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245")).
 			Italic(true)
@@ -47,17 +37,6 @@ var (
 	hintDescStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	hintSepStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
-
-// trimTrailingBlankLines drops the padding rows the list appends to fill its
-// nominal height, so the content-sized scrim panel ends where content does.
-func trimTrailingBlankLines(s string) string {
-	lines := strings.Split(s, "\n")
-	end := len(lines)
-	for end > 1 && strings.TrimSpace(ansi.Strip(lines[end-1])) == "" {
-		end--
-	}
-	return strings.Join(lines[:end], "\n")
-}
 
 // renderHint formats key/description pairs as a status hint line.
 func renderHint(pairs ...[2]string) string {
@@ -100,51 +79,27 @@ func (m Model) View() tea.View {
 	// Two columns: list on left (with built-in title), preview on right
 	// Set explicit widths so boxes fill their allocated space exactly.
 	// In lipgloss v2, Width() includes borders and padding, so pass box width.
-	listBox, previewBox := listStyle, previewStyle
-	if m.scrimMode {
-		listBox, previewBox = scrimListStyle, scrimPreviewStyle
-	}
 	var columns string
 	if m.showPreview {
 		listBoxWidth := (m.width * 45) / 100
 		previewBoxWidth := m.width - listBoxWidth
-		styledListView := listBox.Width(listBoxWidth).Render(listInner)
-		previewView := previewBox.Width(previewBoxWidth).Render(m.previewPort.View())
+		styledListView := listStyle.Width(listBoxWidth).Render(listInner)
+		previewView := previewStyle.Width(previewBoxWidth).Render(m.previewPort.View())
 		columns = lipgloss.JoinHorizontal(lipgloss.Top, styledListView, previewView)
 	} else {
-		columns = listBox.Width(m.width).Render(listInner)
+		columns = listStyle.Width(m.width).Render(listInner)
 	}
 
-	// The panel is content-sized in compact scrim mode: the list pads itself
-	// to the height it was given, and boxing those trailing blanks into a
-	// 75%-tall panel read as a huge empty slab on the scrim. Preview mode
-	// keeps the full height (the preview pane wants it), and the classic
-	// full-screen path keeps filling the terminal.
-	frameH := m.height
-	if m.scrimMode && !m.showPreview {
-		columns = trimTrailingBlankLines(columns)
-		if h := lipgloss.Height(columns); h < frameH {
-			frameH = h
-		}
-	}
-
-	// Place within a fixed-size frame so every line is padded to full width
-	// and empty lines are filled with spaces. Prevents underlying content
-	// bleed-through in bubbletea v2's diff-based renderer.
-	constrained := lipgloss.Place(m.width, frameH, lipgloss.Left, lipgloss.Top, columns)
-
-	// Scrim mode: the panel rect sits centered on a solid scrim backdrop
-	// filling the whole client popup.
-	content := constrained
-	if m.scrimMode {
-		content = scrim.Fill(constrained, m.screenW, m.screenH)
-	}
+	// Place within a fixed-size frame so every line is padded to full terminal width
+	// and empty lines are filled with spaces. Prevents underlying content bleed-through
+	// in bubbletea v2's diff-based renderer.
+	constrained := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, columns)
 
 	if viewCount <= 3 {
 		logDebug("View() call #%d rendered", viewCount)
 	}
 
-	v := tea.NewView(content)
+	v := tea.NewView(constrained)
 	v.AltScreen = true
 	v.WindowTitle = "sesh"
 	return v

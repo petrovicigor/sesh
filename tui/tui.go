@@ -44,11 +44,7 @@ func NewTUI(
 	}
 }
 
-// Run starts the TUI. scrimMode means the tmux bind opened a full-client
-// popup and the UI renders as a borderless panel centered on a solid scrim
-// backdrop. Off (a direct `sesh tui`, full-screen in a pane) keeps the
-// classic bordered rendering.
-func (t *TUI) Run(scrimMode bool) (string, error) {
+func (t *TUI) Run() (string, error) {
 	resetStartTime()
 	logDebug("Run() entered")
 
@@ -78,7 +74,7 @@ func (t *TUI) Run(scrimMode bool) (string, error) {
 	// sesh process before it asked tmux to queue this popup.
 	restore, _ := LoadRestoreState()
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, restore, scrimMode)
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, restore)
 	logDebug("newModel() done")
 
 	p := tea.NewProgram(m)
