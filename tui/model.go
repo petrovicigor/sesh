@@ -176,6 +176,7 @@ type Model struct {
 	groupMode         GroupMode                // current workspace grouping mode (package vs branch)
 	claudeAttention   *map[string]bool         // shared with delegate: tmux session name -> needs attention
 	savedState        *map[string]bool         // shared with delegate: session name -> has saved state
+	gitChanges        *map[string]gitChanges   // shared with delegate: path -> working-tree change counts
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
 	showPreview            bool   // true when preview pane is visible (toggled with ctrl+p)
@@ -266,6 +267,7 @@ func newModel(
 		processInfo:      &map[string]string{},
 		claudeAttention:  &map[string]bool{},
 		savedState:       &map[string]bool{},
+		gitChanges:       &map[string]gitChanges{},
 		allItems:         items,
 		worktreeGroups:   worktreeGroups,
 		expandedGroup:    new(string),
@@ -283,7 +285,7 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState}
+	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState, gitChanges: m.gitChanges}
 	l := list.New(displayItems, delegate, listWidth, 24)
 	l.Title = "⚡ Sesh Sessions" // Set initial title
 	l.SetShowStatusBar(false)  // Hide item count
