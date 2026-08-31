@@ -22,13 +22,13 @@ func NewTuiCommand(
 	p previewer.Previewer,
 	r recent.Recent,
 ) *cobra.Command {
-	var scrimTarget string
+	var scrimMode bool
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Interactive session picker (Bubble Tea TUI)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tuiInstance := tui.NewTUI(l, c, i, t, cfg, p, r)
-			selected, err := tuiInstance.Run(scrimTarget)
+			selected, err := tuiInstance.Run(scrimMode)
 			if err != nil {
 				return err
 			}
@@ -46,8 +46,8 @@ func NewTuiCommand(
 		},
 	}
 
-	cmd.Flags().StringVar(&scrimTarget, "scrim", "",
-		"render as a borderless panel over a dimmed capture of the given tmux window (the full-client popup bind passes #{window_id})")
+	cmd.Flags().BoolVar(&scrimMode, "scrim", false,
+		"render as a borderless panel on a solid scrim backdrop (set by the full-client tmux popup bind)")
 
 	return cmd
 }

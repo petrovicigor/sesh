@@ -14,7 +14,6 @@ import (
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
-	"github.com/joshmedeski/sesh/v2/scrim"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
@@ -195,17 +194,17 @@ type Model struct {
 	// Consumed by Init() which fires applyRestoreStateMsg once.
 	pendingRestore *RestoreState
 
-	// Scrim mode: the tmux bind opened a FULL-WINDOW popup (`sesh tui --scrim
-	// <window-id>`) and the TUI paints an OpenCode-style dimmed backdrop of
-	// the window behind it, with the UI as a borderless panel centered on
+	// Scrim mode: the tmux bind opened a FULL-CLIENT popup (`sesh tui
+	// --scrim`) and the TUI paints the overlay itself — a solid scrim
+	// backdrop edge to edge with the UI as a borderless panel centered on
 	// top. width/height above become the PANEL box (45% or 80% wide per
-	// showPreview, 75% tall); screenW/screenH are the real popup dims. A
-	// direct `sesh tui` (the `t` alias, full-screen in a pane) keeps today's
-	// bordered full-size rendering — scrimMode stays false.
+	// showPreview, content-sized up to 75% tall); screenW/screenH are the
+	// real popup dims. A direct `sesh tui` (the `t` alias, full-screen in a
+	// pane) keeps today's bordered full-size rendering — scrimMode stays
+	// false.
 	scrimMode bool
 	screenW   int
 	screenH   int
-	snap      *scrim.Snapshot // dimmed backdrop; nil composes a plain scrim
 }
 
 func newModel(
@@ -222,7 +221,6 @@ func newModel(
 	excludesPath string,
 	restore *RestoreState,
 	scrimMode bool,
-	snap *scrim.Snapshot,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -274,7 +272,6 @@ func newModel(
 		width:            0,
 		height:           0,
 		scrimMode:        scrimMode,
-		snap:             snap,
 		showPreview:      initialShowPreview,
 		pendingRestore:   restore,
 		isDark:           true, // default until BackgroundColorMsg arrives

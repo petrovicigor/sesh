@@ -7,6 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/joshmedeski/sesh/v2/scrim"
 )
 
 // miasmaBorder reads MIASMA_BORDER_FG (set by the tmux miasma theme) so popup
@@ -44,6 +47,17 @@ var (
 	hintDescStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	hintSepStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
+
+// trimTrailingBlankLines drops the padding rows the list appends to fill its
+// nominal height, so the content-sized scrim panel ends where content does.
+func trimTrailingBlankLines(s string) string {
+	lines := strings.Split(s, "\n")
+	end := len(lines)
+	for end > 1 && strings.TrimSpace(ansi.Strip(lines[end-1])) == "" {
+		end--
+	}
+	return strings.Join(lines[:end], "\n")
+}
 
 // renderHint formats key/description pairs as a status hint line.
 func renderHint(pairs ...[2]string) string {
@@ -101,16 +115,29 @@ func (m Model) View() tea.View {
 		columns = listBox.Width(m.width).Render(listInner)
 	}
 
-	// Place within a fixed-size frame so every line is padded to full terminal width
-	// and empty lines are filled with spaces. Prevents underlying content bleed-through
-	// in bubbletea v2's diff-based renderer.
-	constrained := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, columns)
+	// The panel is content-sized in compact scrim mode: the list pads itself
+	// to the height it was given, and boxing those trailing blanks into a
+	// 75%-tall panel read as a huge empty slab on the scrim. Preview mode
+	// keeps the full height (the preview pane wants it), and the classic
+	// full-screen path keeps filling the terminal.
+	frameH := m.height
+	if m.scrimMode && !m.showPreview {
+		columns = trimTrailingBlankLines(columns)
+		if h := lipgloss.Height(columns); h < frameH {
+			frameH = h
+		}
+	}
 
-	// Scrim mode: the panel rect composes centered over the dimmed capture of
-	// the window behind the full-client popup (nil snapshot: plain scrim).
+	// Place within a fixed-size frame so every line is padded to full width
+	// and empty lines are filled with spaces. Prevents underlying content
+	// bleed-through in bubbletea v2's diff-based renderer.
+	constrained := lipgloss.Place(m.width, frameH, lipgloss.Left, lipgloss.Top, columns)
+
+	// Scrim mode: the panel rect sits centered on a solid scrim backdrop
+	// filling the whole client popup.
 	content := constrained
 	if m.scrimMode {
-		content = m.snap.Compose(constrained, m.screenW, m.screenH)
+		content = scrim.Fill(constrained, m.screenW, m.screenH)
 	}
 
 	if viewCount <= 3 {
