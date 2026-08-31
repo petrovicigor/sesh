@@ -29,6 +29,13 @@ var (
 			BorderForeground(miasmaBorder()).
 			Padding(1)
 
+	// Scrim-mode column boxes: borderless (the raised panel against the
+	// dimmed backdrop replaces the border — OpenCode-style), horizontal
+	// chrome kept at 4 like the bordered pair so the width arithmetic in
+	// applyLayout holds for both; vertical chrome is boxChromeV's business.
+	scrimListStyle    = lipgloss.NewStyle().Padding(1, 2)
+	scrimPreviewStyle = lipgloss.NewStyle().Padding(1, 2)
+
 	statusMsgStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245")).
 			Italic(true)
@@ -79,15 +86,19 @@ func (m Model) View() tea.View {
 	// Two columns: list on left (with built-in title), preview on right
 	// Set explicit widths so boxes fill their allocated space exactly.
 	// In lipgloss v2, Width() includes borders and padding, so pass box width.
+	listBox, previewBox := listStyle, previewStyle
+	if m.scrimMode {
+		listBox, previewBox = scrimListStyle, scrimPreviewStyle
+	}
 	var columns string
 	if m.showPreview {
 		listBoxWidth := (m.width * 45) / 100
 		previewBoxWidth := m.width - listBoxWidth
-		styledListView := listStyle.Width(listBoxWidth).Render(listInner)
-		previewView := previewStyle.Width(previewBoxWidth).Render(m.previewPort.View())
+		styledListView := listBox.Width(listBoxWidth).Render(listInner)
+		previewView := previewBox.Width(previewBoxWidth).Render(m.previewPort.View())
 		columns = lipgloss.JoinHorizontal(lipgloss.Top, styledListView, previewView)
 	} else {
-		columns = listStyle.Width(m.width).Render(listInner)
+		columns = listBox.Width(m.width).Render(listInner)
 	}
 
 	// Place within a fixed-size frame so every line is padded to full terminal width
@@ -95,11 +106,18 @@ func (m Model) View() tea.View {
 	// in bubbletea v2's diff-based renderer.
 	constrained := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, columns)
 
+	// Scrim mode: the panel rect composes centered over the dimmed capture of
+	// the window behind the full-client popup (nil snapshot: plain scrim).
+	content := constrained
+	if m.scrimMode {
+		content = m.snap.Compose(constrained, m.screenW, m.screenH)
+	}
+
 	if viewCount <= 3 {
 		logDebug("View() call #%d rendered", viewCount)
 	}
 
-	v := tea.NewView(constrained)
+	v := tea.NewView(content)
 	v.AltScreen = true
 	v.WindowTitle = "sesh"
 	return v

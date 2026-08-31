@@ -14,6 +14,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
+	"github.com/joshmedeski/sesh/v2/scrim"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
@@ -176,6 +177,7 @@ type Model struct {
 	groupMode         GroupMode                // current workspace grouping mode (package vs branch)
 	claudeAttention   *map[string]bool         // shared with delegate: tmux session name -> needs attention
 	savedState        *map[string]bool         // shared with delegate: session name -> has saved state
+	gitChanges        *map[string]gitChanges   // shared with delegate: path -> working-tree change counts
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
 	showPreview            bool   // true when preview pane is visible (toggled with ctrl+p)
@@ -192,6 +194,18 @@ type Model struct {
 	// Pending state from a kill-and-relaunch toggle. nil on normal launch.
 	// Consumed by Init() which fires applyRestoreStateMsg once.
 	pendingRestore *RestoreState
+
+	// Scrim mode: the tmux bind opened a FULL-WINDOW popup (`sesh tui --scrim
+	// <window-id>`) and the TUI paints an OpenCode-style dimmed backdrop of
+	// the window behind it, with the UI as a borderless panel centered on
+	// top. width/height above become the PANEL box (45% or 80% wide per
+	// showPreview, 75% tall); screenW/screenH are the real popup dims. A
+	// direct `sesh tui` (the `t` alias, full-screen in a pane) keeps today's
+	// bordered full-size rendering — scrimMode stays false.
+	scrimMode bool
+	screenW   int
+	screenH   int
+	snap      *scrim.Snapshot // dimmed backdrop; nil composes a plain scrim
 }
 
 func newModel(
@@ -207,6 +221,8 @@ func newModel(
 	frecencyScores map[string]float64,
 	excludesPath string,
 	restore *RestoreState,
+	scrimMode bool,
+	snap *scrim.Snapshot,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -257,6 +273,8 @@ func newModel(
 		sessions:         sessions,
 		width:            0,
 		height:           0,
+		scrimMode:        scrimMode,
+		snap:             snap,
 		showPreview:      initialShowPreview,
 		pendingRestore:   restore,
 		isDark:           true, // default until BackgroundColorMsg arrives
@@ -266,6 +284,7 @@ func newModel(
 		processInfo:      &map[string]string{},
 		claudeAttention:  &map[string]bool{},
 		savedState:       &map[string]bool{},
+		gitChanges:       &map[string]gitChanges{},
 		allItems:         items,
 		worktreeGroups:   worktreeGroups,
 		expandedGroup:    new(string),
@@ -283,7 +302,7 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState}
+	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState, gitChanges: m.gitChanges}
 	l := list.New(displayItems, delegate, listWidth, 24)
 	l.Title = "⚡ Sesh Sessions" // Set initial title
 	l.SetShowStatusBar(false)  // Hide item count
@@ -354,7 +373,7 @@ func (m Model) Init() tea.Cmd {
 		return tea.RequestBackgroundColor()
 	}
 
-	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState()}
+	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState(), checkGitChanges(tmuxSessionPaths(m.allItems))}
 
 	// When restoring from a kill-and-relaunch toggle, the restore handler owns
 	// filter-mode entry itself (it must enter filter mode BEFORE setting text,
