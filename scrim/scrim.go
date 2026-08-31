@@ -17,6 +17,7 @@ package scrim
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -134,9 +135,11 @@ type colorRef struct {
 }
 
 type style struct {
-	fg, bg  colorRef
-	bold    bool
-	reverse bool
+	fg, bg    colorRef
+	bold      bool
+	reverse   bool
+	italic    bool
+	underline bool
 }
 
 // cell is one terminal column. A wide rune owns its leading cell (width 2)
@@ -199,8 +202,31 @@ func dimStyle(st style, p *palette) style {
 	fg := dim(resolve(fgRef, !st.reverse, p))
 	bg := dim(resolve(bgRef, st.reverse, p))
 	return style{
-		fg:   colorRef{kind: colRGB, r: fg.r, g: fg.g, b: fg.b},
-		bg:   colorRef{kind: colRGB, r: bg.r, g: bg.g, b: bg.b},
-		bold: st.bold,
+		fg:        colorRef{kind: colRGB, r: fg.r, g: fg.g, b: fg.b},
+		bg:        colorRef{kind: colRGB, r: bg.r, g: bg.g, b: bg.b},
+		bold:      st.bold,
+		italic:    st.italic,
+		underline: st.underline,
 	}
+}
+
+// DimTerminalBG sets the terminal's own default background to the scrim base
+// (OSC 11, wrapped in tmux passthrough — allow-passthrough is on). kitty
+// paints its window padding with the default background, which popup cells
+// can never cover, so without this the overlay stops at the cell grid and
+// leaves bright strips at the window edges (ghostty extends edge-cell colors
+// into its padding and doesn't need it, but it's harmless there). The box
+// paints its background explicitly (see boxLine), so nothing on screen
+// depends on the default while the popup is open. Also a free win: the whole
+// terminal drops to the dim tone the instant the popup opens, before the
+// first frame lands.
+func DimTerminalBG(w io.Writer) {
+	p := currentPalette()
+	fmt.Fprintf(w, "\x1bPtmux;\x1b\x1b]11;#%02x%02x%02x\x07\x1b\\", p.base.r, p.base.g, p.base.b)
+}
+
+// RestoreTerminalBG resets the terminal background to its configured default
+// (OSC 111) on the way out.
+func RestoreTerminalBG(w io.Writer) {
+	fmt.Fprint(w, "\x1bPtmux;\x1b\x1b]111\x07\x1b\\")
 }

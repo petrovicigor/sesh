@@ -115,6 +115,14 @@ func applySGR(seq string, st *style) {
 			st.bold = true
 		case n == 22:
 			st.bold = false
+		case n == 3:
+			st.italic = true
+		case n == 23:
+			st.italic = false
+		case n == 4:
+			st.underline = true
+		case n == 24:
+			st.underline = false
 		case n == 7:
 			st.reverse = true
 		case n == 27:

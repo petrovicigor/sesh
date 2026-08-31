@@ -514,6 +514,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyPanelSize()
 		return m.applyLayout()
 
+	case ScrimMsg:
+		m.snap = msg.Snap
+		return m, nil
+
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
 		// Rebuild list styles with correct dark/light mode

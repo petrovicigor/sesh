@@ -120,10 +120,17 @@ func TestComposeSnapshotSmallerThanScreen(t *testing.T) {
 }
 
 func TestComposePanelKeepsOwnStyling(t *testing.T) {
+	t.Setenv("MIASMA_MODE", "dark") // pin: the test asserts dark-theme hex
 	s := snap(t, 8, 1, []string{"aaaaaaaa"})
-	panel := "\x1b[38;5;2mOK\x1b[0m"
+	panel := "\x1b[3;38;5;2mOK\x1b[0m"
 	frame := s.Compose(panel, 8, 1)
-	if !strings.Contains(frame, "\x1b[38;5;2mOK") {
-		t.Error("panel escapes were rewritten")
+	// The panel's own colors and attributes survive re-serialization...
+	if !strings.Contains(frame, ";38;5;2") || !strings.Contains(frame, ";3;") {
+		t.Errorf("panel fg/italic lost: %q", frame)
+	}
+	// ...while its default background is made explicit (the theme bg —
+	// the terminal default is hijacked to the scrim base while open).
+	if !strings.Contains(frame, ";48;2;34;34;34") {
+		t.Errorf("panel default bg not rewritten to theme bg: %q", frame)
 	}
 }

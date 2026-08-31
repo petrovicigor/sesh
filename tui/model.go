@@ -201,10 +201,11 @@ type Model struct {
 	// it. width/height above become the BOX; screenW/screenH are the real
 	// popup dims. A direct `sesh tui` (the `t` alias, full-screen in a pane)
 	// keeps the plain full-size rendering — scrimMode stays false.
-	scrimMode bool
-	screenW   int
-	screenH   int
-	snap      *scrim.Snapshot // dimmed backdrop; nil composes a plain dim
+	scrimMode   bool
+	scrimTarget string // window to capture for the backdrop (async, in Init)
+	screenW     int
+	screenH     int
+	snap        *scrim.Snapshot // dimmed backdrop; nil composes a plain dim
 }
 
 func newModel(
@@ -221,7 +222,7 @@ func newModel(
 	excludesPath string,
 	restore *RestoreState,
 	scrimMode bool,
-	snap *scrim.Snapshot,
+	scrimTarget string,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -273,7 +274,7 @@ func newModel(
 		width:            0,
 		height:           0,
 		scrimMode:        scrimMode,
-		snap:             snap,
+		scrimTarget:      scrimTarget,
 		showPreview:      initialShowPreview,
 		pendingRestore:   restore,
 		isDark:           true, // default until BackgroundColorMsg arrives
@@ -373,6 +374,21 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState()}
+
+	// The backdrop capture rides along asynchronously: several tmux
+	// round-trips, and done before the program started it held the popup
+	// open on a bare cursor. Until it lands, the nil snapshot composes a
+	// plain dimmed background.
+	if m.scrimMode && m.scrimTarget != "" {
+		target := m.scrimTarget
+		cmds = append(cmds, func() tea.Msg {
+			snap, err := scrim.Capture(target)
+			if err != nil {
+				logDebug("scrim capture failed: %v", err)
+			}
+			return ScrimMsg{Snap: snap}
+		})
+	}
 
 	// When restoring from a kill-and-relaunch toggle, the restore handler owns
 	// filter-mode entry itself (it must enter filter mode BEFORE setting text,

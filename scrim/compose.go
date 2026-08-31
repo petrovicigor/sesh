@@ -12,11 +12,13 @@ import (
 // smaller than the screen, fills the difference with plain scrim base, so
 // capture failure degrades to a dimmed-but-blank backdrop.
 //
-// Panel cells keep whatever they rendered; default-background cells come out
-// as the terminal background — one step above the scrim base — which is what
-// makes the borderless panel read as a raised layer. Panel lines shorter
-// than the widest are padded defensively; lines wider than the screen are
-// truncated.
+// Panel cells keep their styling, except that default BACKGROUNDS are made
+// explicit (the theme background): while the popup is open the terminal's
+// default background is set to the scrim base (DimTerminalBG, so kitty's
+// window padding dims too), and a box cell left on the default would dim
+// with it. That explicit theme bg, well above the scrim base, is what makes
+// the borderless panel read as a raised layer. Panel lines shorter than the
+// widest are padded defensively; lines wider than the screen are truncated.
 func (s *Snapshot) Compose(panel string, w, h int) string {
 	p := currentPalette()
 	lines := strings.Split(panel, "\n")
@@ -49,16 +51,104 @@ func (s *Snapshot) Compose(panel string, w, h int) string {
 		}
 		line := lines[row-y]
 		b.WriteString(s.seg(row, 0, x, p))
-		b.WriteString("\x1b[0m")
-		b.WriteString(line)
-		if pad := boxW - ansi.StringWidth(line); pad > 0 {
-			b.WriteString("\x1b[0m")
-			b.WriteString(strings.Repeat(" ", pad))
-		}
-		b.WriteString("\x1b[0m")
+		b.WriteString(boxLine(line, boxW, p))
 		b.WriteString(s.seg(row, x+boxW, w, p))
 	}
 	return b.String()
+}
+
+// boxLine re-renders one panel row with every default background rewritten
+// to the explicit theme background (see Compose's doc), padded to width.
+// Foregrounds and attributes pass through as the panel styled them —
+// default foregrounds stay default, since only the background is hijacked
+// while the popup is open.
+func boxLine(line string, width int, p *palette) string {
+	cells := parseANSI(line)
+	var b strings.Builder
+	var cur style
+	curSet := false
+	emit := func(c cell) {
+		if !curSet || c.st != cur {
+			writeBoxSGR(&b, c.st, p)
+			cur, curSet = c.st, true
+		}
+		b.WriteRune(c.r)
+	}
+	col := 0
+	for _, c := range cells {
+		if col >= width {
+			break
+		}
+		if c.width == 0 {
+			continue // continuation cell of a wide rune already emitted
+		}
+		if c.width == 2 && col+1 >= width {
+			// Wide rune bisected by the panel edge: a space keeps the
+			// column count honest.
+			emit(cell{r: ' ', width: 1, st: c.st})
+			col++
+			continue
+		}
+		emit(c)
+		col += int(c.width)
+	}
+	for ; col < width; col++ {
+		emit(cell{r: ' ', width: 1})
+	}
+	b.WriteString("\x1b[0m")
+	return b.String()
+}
+
+// writeBoxSGR serializes a panel style, leading 0 so nothing leaks between
+// runs: attributes as-is, foreground as the panel encoded it, background
+// made explicit when it was the default.
+func writeBoxSGR(b *strings.Builder, st style, p *palette) {
+	b.WriteString("\x1b[0")
+	if st.bold {
+		b.WriteString(";1")
+	}
+	if st.italic {
+		b.WriteString(";3")
+	}
+	if st.underline {
+		b.WriteString(";4")
+	}
+	if st.reverse {
+		b.WriteString(";7")
+	}
+	switch st.fg.kind {
+	case colANSI:
+		if st.fg.n < 8 {
+			b.WriteString(";3")
+			b.WriteString(itoa(st.fg.n))
+		} else {
+			b.WriteString(";9")
+			b.WriteString(itoa(st.fg.n - 8))
+		}
+	case col256:
+		b.WriteString(";38;5;")
+		b.WriteString(itoa(st.fg.n))
+	case colRGB:
+		writeColor(b, ";38;2;", rgb{st.fg.r, st.fg.g, st.fg.b})
+	}
+	switch st.bg.kind {
+	case colDefault:
+		writeColor(b, ";48;2;", p.bg)
+	case colANSI:
+		if st.bg.n < 8 {
+			b.WriteString(";4")
+			b.WriteString(itoa(st.bg.n))
+		} else {
+			b.WriteString(";10")
+			b.WriteString(itoa(st.bg.n - 8))
+		}
+	case col256:
+		b.WriteString(";48;5;")
+		b.WriteString(itoa(st.bg.n))
+	case colRGB:
+		writeColor(b, ";48;2;", rgb{st.bg.r, st.bg.g, st.bg.b})
+	}
+	b.WriteByte('m')
 }
 
 // bgLine is one full backdrop row: the pre-rendered snapshot line when it
