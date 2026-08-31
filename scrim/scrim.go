@@ -225,8 +225,12 @@ func DimTerminalBG(w io.Writer) {
 	fmt.Fprintf(w, "\x1bPtmux;\x1b\x1b]11;#%02x%02x%02x\x07\x1b\\", p.base.r, p.base.g, p.base.b)
 }
 
-// RestoreTerminalBG resets the terminal background to its configured default
-// (OSC 111) on the way out.
+// RestoreTerminalBG puts the terminal background back to the THEME
+// background, explicitly, on the way out. Not OSC 111: that resets to the
+// terminal's config-file default, and kitty's config carries no background
+// at all (the Miasma theme lands dynamically via the dark/light switcher) —
+// the reset came out black and stuck until the next popup.
 func RestoreTerminalBG(w io.Writer) {
-	fmt.Fprint(w, "\x1bPtmux;\x1b\x1b]111\x07\x1b\\")
+	p := currentPalette()
+	fmt.Fprintf(w, "\x1bPtmux;\x1b\x1b]11;#%02x%02x%02x\x07\x1b\\", p.bg.r, p.bg.g, p.bg.b)
 }
