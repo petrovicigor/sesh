@@ -1,9 +1,6 @@
 package tui
 
-import (
-	"github.com/joshmedeski/sesh/v2/model"
-	"github.com/joshmedeski/sesh/v2/scrim"
-)
+import "github.com/joshmedeski/sesh/v2/model"
 
 type FilterType int
 
@@ -46,12 +43,6 @@ type SavedStateMsg struct {
 // GitChangesMsg delivers the one-shot working-tree check for tmux-backed rows.
 type GitChangesMsg struct {
 	Changes map[string]gitChanges // absolute directory path -> change counts
-}
-
-// ScrimMsg delivers the async backdrop capture (nil on failure — the plain
-// dimmed background simply stays).
-type ScrimMsg struct {
-	Snap *scrim.Snapshot
 }
 
 // SessionKilledMsg is sent after a tmux session has been killed (with process cleanup).

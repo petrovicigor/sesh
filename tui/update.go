@@ -37,40 +37,11 @@ func (m *Model) cancelInflightPreview() {
 	}
 }
 
-// applyPanelSize derives width/height from the screen dims. In scrim mode the
-// UI is a panel boxed to what the popup used to be opened at (45% compact /
-// 80% with preview, 75% tall) inside the full-client popup; otherwise the UI
-// fills the screen as before.
-func (m *Model) applyPanelSize() {
-	if !m.scrimMode {
-		m.width, m.height = m.screenW, m.screenH
-		return
-	}
-	pct := 45
-	if m.showPreview {
-		pct = 80
-	}
-	m.width = m.screenW * pct / 100
-	m.height = m.screenH * 75 / 100
-}
-
 // toggleAndRelaunch serializes current TUI state (filter text, selected session,
 // target preview flag), asks tmux to queue a new popup at the opposite size
 // via tmux run-shell -b, and exits. The queued popup opens after the current
 // one closes, and the new sesh process reads the state file.
-//
-// Scrim mode skips the whole dance: the full-client popup freed the panel
-// from tmux's fixed popup geometry, so the preview toggles in place and the
-// panel just re-lays-out at the other width.
 func (m Model) toggleAndRelaunch() (Model, tea.Cmd) {
-	if m.scrimMode {
-		m.showPreview = !m.showPreview
-		if !m.showPreview {
-			m.cancelInflightPreview()
-		}
-		m.applyPanelSize()
-		return m.applyLayout()
-	}
 	var sessionName string
 	switch item := m.list.SelectedItem().(type) {
 	case sessionItem:
@@ -103,21 +74,10 @@ func (m Model) toggleAndRelaunch() (Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// boxChromeV is the rows a column box spends on its own vertical chrome:
-// border plus padding when bordered (full-screen mode), padding only for
-// scrim mode's borderless boxes. Horizontal chrome is 4 in both modes, so
-// the width arithmetic stays shared.
-func (m Model) boxChromeV() int {
-	if m.scrimMode {
-		return 2
-	}
-	return 4
-}
-
 // listInnerHeight returns the list's inner content height, reserving two rows for
 // the blank spacer + hint line when a worktree group is expanded.
 func (m Model) listInnerHeight() int {
-	h := m.height - m.boxChromeV()
+	h := m.height - 4
 	if m.expandedGroup != nil && *m.expandedGroup != "" {
 		h -= 2
 	}
@@ -133,7 +93,7 @@ func (m Model) applyLayout() (Model, tea.Cmd) {
 		previewBoxWidth := m.width - listBoxWidth
 		m.list.SetSize(listBoxWidth-4, listHeight)
 		m.previewPort.SetWidth(previewBoxWidth - 4)
-		m.previewPort.SetHeight(m.height - m.boxChromeV())
+		m.previewPort.SetHeight(m.height - 4)
 	} else {
 		m.list.SetSize(m.width-4, listHeight)
 	}
@@ -510,13 +470,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		logDebug("WindowSizeMsg: %dx%d", msg.Width, msg.Height)
-		m.screenW, m.screenH = msg.Width, msg.Height
-		m.applyPanelSize()
+		m.width = msg.Width
+		m.height = msg.Height
 		return m.applyLayout()
-
-	case ScrimMsg:
-		m.snap = msg.Snap
-		return m, nil
 
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
@@ -772,16 +728,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for k, v := range msg.Sessions {
 			(*m.savedState)[k] = v
-		}
-		return m, nil
-
-	case GitChangesMsg:
-		// Update map in-place to preserve delegate's pointer reference
-		for k := range *m.gitChanges {
-			delete(*m.gitChanges, k)
-		}
-		for k, v := range msg.Changes {
-			(*m.gitChanges)[k] = v
 		}
 		return m, nil
 

@@ -14,7 +14,6 @@ import (
 	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/previewer"
-	"github.com/joshmedeski/sesh/v2/scrim"
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
@@ -194,18 +193,6 @@ type Model struct {
 	// Pending state from a kill-and-relaunch toggle. nil on normal launch.
 	// Consumed by Init() which fires applyRestoreStateMsg once.
 	pendingRestore *RestoreState
-
-	// Scrim mode: the tmux bind opened a FULL-CLIENT popup (`sesh tui --scrim
-	// <window-id>`) and the TUI draws its classic box (45% compact / 80% with
-	// preview, 75% tall) centered on a dimmed snapshot of the window behind
-	// it. width/height above become the BOX; screenW/screenH are the real
-	// popup dims. A direct `sesh tui` (the `t` alias, full-screen in a pane)
-	// keeps the plain full-size rendering — scrimMode stays false.
-	scrimMode   bool
-	scrimTarget string // window to capture for the backdrop (async, in Init)
-	screenW     int
-	screenH     int
-	snap        *scrim.Snapshot // dimmed backdrop; nil composes a plain dim
 }
 
 func newModel(
@@ -221,8 +208,6 @@ func newModel(
 	frecencyScores map[string]float64,
 	excludesPath string,
 	restore *RestoreState,
-	scrimMode bool,
-	scrimTarget string,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -273,8 +258,6 @@ func newModel(
 		sessions:         sessions,
 		width:            0,
 		height:           0,
-		scrimMode:        scrimMode,
-		scrimTarget:      scrimTarget,
 		showPreview:      initialShowPreview,
 		pendingRestore:   restore,
 		isDark:           true, // default until BackgroundColorMsg arrives
@@ -374,21 +357,6 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState()}
-
-	// The backdrop capture rides along asynchronously: several tmux
-	// round-trips, and done before the program started it held the popup
-	// open on a bare cursor. Until it lands, the nil snapshot composes a
-	// plain dimmed background.
-	if m.scrimMode && m.scrimTarget != "" {
-		target := m.scrimTarget
-		cmds = append(cmds, func() tea.Msg {
-			snap, err := scrim.Capture(target)
-			if err != nil {
-				logDebug("scrim capture failed: %v", err)
-			}
-			return ScrimMsg{Snap: snap}
-		})
-	}
 
 	// When restoring from a kill-and-relaunch toggle, the restore handler owns
 	// filter-mode entry itself (it must enter filter mode BEFORE setting text,
