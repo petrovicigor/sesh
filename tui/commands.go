@@ -18,6 +18,31 @@ import (
 	"github.com/joshmedeski/sesh/v2/tmux"
 )
 
+// Floating-pane geometry for the bind-o float. Height matches the bind's -y;
+// the width swaps on the preview toggle (compact = preview off).
+const (
+	floatCompactWidth = "45%"
+	floatWideWidth    = "80%"
+	floatHeight       = "75%"
+)
+
+// resizeOwnFloat resizes sesh's own floating pane to the width matching the
+// preview state and re-centres it. Called synchronously from togglePreview —
+// see the ordering rationale there. On error the pane keeps its old size,
+// which the layout (driven by real WindowSizeMsg values) is still correct for.
+func resizeOwnFloat(t tmux.Tmux, showPreview bool) error {
+	width := floatCompactWidth
+	if showPreview {
+		width = floatWideWidth
+	}
+	pane := os.Getenv("TMUX_PANE")
+	if pane == "" {
+		return nil
+	}
+	_, err := t.ResizeFloatingPane(pane, width, floatHeight)
+	return err
+}
+
 func loadSessionsWithFilter(l lister.Lister, filter FilterType) tea.Cmd {
 	return func() tea.Msg {
 		// Invalidate tmux cache to get fresh session data
@@ -302,13 +327,18 @@ func scheduleClaudeAttentionTick() tea.Cmd {
 }
 
 // checkClaudeAttention detects sessions needing user attention using a hybrid
-// approach: tmux @claude_icon for fast detection (set instantly by hooks),
-// then DB + process liveness to filter stale icons from dead processes or
-// debounce bugs where the icon wasn't cleared after approval.
+// approach: tmux @claude_state for fast detection (set instantly by hooks),
+// then DB + process liveness to filter stale state from dead processes or
+// debounce bugs where the state wasn't cleared after approval.
+//
+// @claude_state carries the bare status word ("waiting"/"done"/…) that
+// claude-sessions writes alongside the colored @claude_icon — matching the
+// word instead of sniffing the icon's theme hex means a theme retune can't
+// silently break attention detection.
 func checkClaudeAttention() tea.Cmd {
 	return func() tea.Msg {
-		// Fast path: read @claude_icon from tmux windows
-		out, err := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}\t#{@claude_icon}").Output()
+		// Fast path: read @claude_state from tmux windows
+		out, err := exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}\t#{@claude_state}").Output()
 		if err != nil {
 			return ClaudeAttentionMsg{Sessions: nil}
 		}
@@ -319,7 +349,7 @@ func checkClaudeAttention() tea.Cmd {
 			if len(parts) != 2 {
 				continue
 			}
-			if strings.Contains(parts[1], "🖐") {
+			if parts[1] == "waiting" {
 				candidates[parts[0]] = true
 			}
 		}

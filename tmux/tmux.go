@@ -28,6 +28,8 @@ type Tmux interface {
 	SwitchOrAttach(name string, opts model.ConnectOpts) (string, error)
 	KillSession(name string) (string, error)
 	StartServer() error
+	IsPaneFloating(pane string) (bool, error)
+	ResizeFloatingPane(pane string, width string, height string) (string, error)
 }
 
 type RealTmux struct {
@@ -41,6 +43,25 @@ func NewTmux(os oswrap.Os, shell shell.Shell) Tmux {
 
 func (t *RealTmux) AttachSession(targetSession string) (string, error) {
 	return t.shell.Cmd("tmux", "attach-session", "-t", targetSession)
+}
+
+// IsPaneFloating reports whether pane is a tmux 3.8 floating pane.
+func (t *RealTmux) IsPaneFloating(pane string) (bool, error) {
+	out, err := t.shell.Cmd("tmux", "display-message", "-p", "-t", pane, "#{pane_floating_flag}")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "1", nil
+}
+
+// ResizeFloatingPane resizes a floating pane and re-centres it. Both run in
+// one tmux client call — a bare ";" argument separates tmux commands. NOTE:
+// move-pane with a position flag moves the TARGET (-t); -s makes it error
+// with "pane is not floating" against whatever -t defaulted to.
+func (t *RealTmux) ResizeFloatingPane(pane string, width string, height string) (string, error) {
+	return t.shell.Cmd("tmux",
+		"resize-pane", "-t", pane, "-x", width, "-y", height, ";",
+		"move-pane", "-P", "centre", "-t", pane)
 }
 
 func (t *RealTmux) SwitchClient(targetSession string) (string, error) {

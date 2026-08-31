@@ -69,12 +69,29 @@ func (t *TUI) Run() (string, error) {
 	// Compute excludes path for workspace manager
 	excludesPath := state.ExcludesPath(os.Getenv("XDG_STATE_HOME"))
 
-	// Rehydrate state from a prior kill-and-relaunch toggle, if any.
-	// See state_restore.go — the env var + temp file is written by a sibling
-	// sesh process before it asked tmux to queue this popup.
-	restore, _ := LoadRestoreState()
+	// The bind-o float marks itself with SESH_FLOAT=1 (new-pane -e): the
+	// floating flag alone is not enough — `sesh tui` inside a float the user
+	// placed by hand must not have its geometry clobbered by the preview
+	// toggle. The flag is still verified so a leaked env var can't make the
+	// toggle resize a tiled pane. Outside tmux ($TMUX_PANE unset) this stays
+	// false and ctrl+p just re-flows.
+	isFloating := false
+	pane := os.Getenv("TMUX_PANE")
+	if pane != "" && os.Getenv("SESH_FLOAT") != "" {
+		var ferr error
+		isFloating, ferr = t.tmux.IsPaneFloating(pane)
+		if ferr != nil {
+			logDebug("Run: IsPaneFloating: %v (treating as not floating)", ferr)
+		}
+	}
 
-	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, restore)
+	// The dim backdrop is not handled here: the bind sets window-style
+	// dim=60% on the way in and its shell tail unsets it when sesh exits
+	// (see bind o in .tmux.conf, including the accepted kill-pane wedge —
+	// kill-pane SIGKILLs this whole process group, so nothing in-process
+	// could clean up anyway).
+
+	m := newModel(t.lister, t.connector, t.icon, t.tmux, t.config, t.previewer, sessions, worktreeDefaults, defaultsPath, frecencyScores, excludesPath, isFloating)
 	logDebug("newModel() done")
 
 	p := tea.NewProgram(m)

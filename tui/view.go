@@ -1,22 +1,11 @@
 package tui
 
 import (
-	"image/color"
-	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
-
-// miasmaBorder reads MIASMA_BORDER_FG (set by the tmux miasma theme) so popup
-// borders match the active pane-border color in both light and dark modes.
-func miasmaBorder() color.Color {
-	if c := os.Getenv("MIASMA_BORDER_FG"); c != "" {
-		return lipgloss.Color(c)
-	}
-	return lipgloss.Color("#3a3328")
-}
 
 // Borderless boxes, like the claude-sessions picker: the popup floats on
 // tmux's native dim=X% backdrop, and background contrast is the elevation —

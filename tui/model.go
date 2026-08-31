@@ -190,9 +190,10 @@ type Model struct {
 	workspaceSubProjects map[string][]string       // cached discovered sub-projects (during manager mode)
 	excludesPath         string                    // path to workspace-excludes.json
 
-	// Pending state from a kill-and-relaunch toggle. nil on normal launch.
-	// Consumed by Init() which fires applyRestoreStateMsg once.
-	pendingRestore *RestoreState
+	// True when sesh runs inside a tmux floating pane (the bind-o float).
+	// The preview toggle then resizes the pane in place instead of only
+	// re-flowing the layout.
+	isFloating bool
 }
 
 func newModel(
@@ -207,7 +208,7 @@ func newModel(
 	defaultsPath string,
 	frecencyScores map[string]float64,
 	excludesPath string,
-	restore *RestoreState,
+	isFloating bool,
 ) Model {
 	logDebug("newModel: building list items")
 
@@ -249,17 +250,12 @@ func newModel(
 	// Create model instance first (we need to pass processInfo pointer to delegate)
 	// width/height start at 0 — View() returns "" until WindowSizeMsg arrives,
 	// preventing a wasted render at wrong default size (eliminates flicker).
-	initialShowPreview := false // default: hidden, toggle with ctrl+p
-	if restore != nil {
-		initialShowPreview = restore.ShowPreview
-	}
-
 	m := Model{
 		sessions:         sessions,
 		width:            0,
 		height:           0,
-		showPreview:      initialShowPreview,
-		pendingRestore:   restore,
+		showPreview:      false, // default: hidden, toggle with ctrl+p
+		isFloating:       isFloating,
 		isDark:           true, // default until BackgroundColorMsg arrives
 		currentFilter:    FilterAll,
 		previewContent:   "",
@@ -356,17 +352,7 @@ func (m Model) Init() tea.Cmd {
 		return tea.RequestBackgroundColor()
 	}
 
-	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState()}
-
-	// When restoring from a kill-and-relaunch toggle, the restore handler owns
-	// filter-mode entry itself (it must enter filter mode BEFORE setting text,
-	// otherwise the '/' keypress lands in the filter input as a literal char).
-	// On normal launch, enterFilterMsg does this.
-	if m.pendingRestore != nil {
-		cmds = append(cmds, func() tea.Msg { return applyRestoreStateMsg{} })
-	} else {
-		cmds = append(cmds, func() tea.Msg { return enterFilterMsg{} })
-	}
+	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState(), func() tea.Msg { return enterFilterMsg{} }}
 
 	// Load preview for first item if available
 	if m.list.SelectedItem() != nil && m.showPreview {

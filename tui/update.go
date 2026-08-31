@@ -37,41 +37,30 @@ func (m *Model) cancelInflightPreview() {
 	}
 }
 
-// toggleAndRelaunch serializes current TUI state (filter text, selected session,
-// target preview flag), asks tmux to queue a new popup at the opposite size
-// via tmux run-shell -b, and exits. The queued popup opens after the current
-// one closes, and the new sesh process reads the state file.
-func (m Model) toggleAndRelaunch() (Model, tea.Cmd) {
-	var sessionName string
-	switch item := m.list.SelectedItem().(type) {
-	case sessionItem:
-		sessionName = item.session.Name
-	case worktreeGroupItem:
-		if rep, ok := representativeSession(item); ok {
-			sessionName = rep.session.Name
+// togglePreview flips the preview in place. In the bind-o float the pane is
+// resized to the matching width and re-centred; the WindowSizeMsg that
+// follows does the (single) re-layout and preview load. The resize runs
+// SYNCHRONOUSLY on the update loop on purpose: it is one ~10ms tmux call,
+// and key-order == resize-order closes the race where a fast double ctrl+p
+// lands its two async resizes out of order and leaves the float at the
+// width opposite the preview state. In a regular pane (`t` alias) the
+// layout just re-flows at the current size.
+func (m Model) togglePreview() (Model, tea.Cmd) {
+	m.showPreview = !m.showPreview
+	if !m.showPreview {
+		m.cancelInflightPreview()
+	}
+	if m.isFloating {
+		if err := resizeOwnFloat(m.tmux, m.showPreview); err == nil {
+			// Sizes now (cheap); the preview load rides the WindowSizeMsg —
+			// loading here too ran the whole git/preview pipeline twice per
+			// toggle-on, with the first load discarded mid-flight.
+			return m.applySizes(), nil
 		} else {
-			sessionName = item.repoName
+			logDebug("togglePreview: resize failed, re-flowing in place: %v", err)
 		}
 	}
-
-	state := RestoreState{
-		Filter:      m.list.FilterValue(),
-		Cursor:      m.list.Index(),
-		ShowPreview: !m.showPreview,
-		SessionName: sessionName,
-	}
-
-	if err := ScheduleRelaunch(state); err != nil {
-		// If the relaunch can't be scheduled, fall back to in-place toggle
-		// so the user isn't left in a broken state.
-		logDebug("toggleAndRelaunch: ScheduleRelaunch failed: %v", err)
-		m.showPreview = !m.showPreview
-		if !m.showPreview {
-			m.cancelInflightPreview()
-		}
-		return m.applyLayout()
-	}
-	return m, tea.Quit
+	return m.applyLayout()
 }
 
 // listInnerHeight returns the list's inner content height, reserving two rows for
@@ -86,7 +75,10 @@ func (m Model) listInnerHeight() int {
 
 // applyLayout recalculates list and preview sizes based on showPreview state.
 // When toggling preview on, loads preview for the current item.
-func (m Model) applyLayout() (Model, tea.Cmd) {
+// applySizes applies the list/preview box geometry for the current size and
+// preview state without starting a preview load (the expensive half of
+// applyLayout — git forks plus a sessions.db query).
+func (m Model) applySizes() Model {
 	listHeight := m.listInnerHeight()
 	if m.showPreview {
 		listBoxWidth := (m.width * 45) / 100
@@ -100,6 +92,11 @@ func (m Model) applyLayout() (Model, tea.Cmd) {
 	if m.showPreview && m.previewContent != "" {
 		m.previewPort.SetContent(m.previewContent)
 	}
+	return m
+}
+
+func (m Model) applyLayout() (Model, tea.Cmd) {
+	m = m.applySizes()
 	if m.showPreview {
 		switch item := m.list.SelectedItem().(type) {
 		case sessionItem:
@@ -492,89 +489,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 		return m, cmd
-
-	case applyRestoreStateMsg:
-		// Rehydrate state after a kill-and-relaunch toggle. See state_restore.go.
-		// showPreview was already set in newModel; here we restore filter text,
-		// cursor position, and trigger any pending save/restore action.
-		if m.pendingRestore == nil {
-			return m, nil
-		}
-		rs := m.pendingRestore
-		m.pendingRestore = nil
-
-		// Enter filter mode via the list's own '/' handler so the filter input
-		// gets focused properly. Must happen BEFORE SetFilterText — otherwise
-		// if we set text first, the '/' would be appended as a literal char.
-		var listCmd tea.Cmd
-		m.list, listCmd = m.list.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-
-		// Mirror the "empty → non-empty" transition that happens when the user
-		// starts typing: swap to full item set for fuzzy search, then apply text.
-		// Without this swap, SetFilterText alone doesn't trigger filter evaluation
-		// (items show but aren't filtered).
-		if rs.Filter != "" {
-			*m.expandedGroup = ""
-			m.list.Filter = seshFilter(m.allItems, m.frecencyScores, m.workspacePrefixes, m.groupMode)
-			m.list.SetItems(m.allItems)
-			m.list.SetFilterText(rs.Filter)
-			m.list.SetFilterState(list.Filtering)
-			m.list.SetSize(m.list.Width(), m.listInnerHeight())
-			m.lastFilter = rs.Filter
-		}
-
-		// Prefer to re-select by session name (stable across filter evaluation).
-		// Fall back to cursor index, clamped to visible range.
-		targetIndex := rs.Cursor
-		if rs.SessionName != "" {
-			for i, listItem := range m.list.VisibleItems() {
-				switch v := listItem.(type) {
-				case sessionItem:
-					if v.session.Name == rs.SessionName {
-						targetIndex = i
-					}
-				case worktreeGroupItem:
-					if v.repoName == rs.SessionName {
-						targetIndex = i
-					}
-				}
-			}
-		}
-		visibleCount := len(m.list.VisibleItems())
-		if visibleCount == 0 {
-			targetIndex = 0
-		} else if targetIndex >= visibleCount {
-			targetIndex = visibleCount - 1
-		} else if targetIndex < 0 {
-			targetIndex = 0
-		}
-		m.list.Select(targetIndex)
-
-		cmds := []tea.Cmd{}
-		if listCmd != nil {
-			cmds = append(cmds, listCmd)
-		}
-		// Load preview for the restored item when preview is on.
-		if m.showPreview {
-			switch item := m.list.SelectedItem().(type) {
-			case sessionItem:
-				var previewCmd tea.Cmd
-				m, previewCmd = m.loadPreviewForItem(item)
-				if previewCmd != nil {
-					cmds = append(cmds, previewCmd)
-				}
-			case worktreeGroupItem:
-				if rep, ok := representativeSession(item); ok {
-					var previewCmd tea.Cmd
-					m, previewCmd = m.loadPreviewForItem(rep)
-					if previewCmd != nil {
-						cmds = append(cmds, previewCmd)
-					}
-				}
-			}
-		}
-
-		return m, tea.Batch(cmds...)
 
 	case SessionsLoadedMsg:
 		// Build new list items from loaded sessions
@@ -988,10 +902,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.TogglePreview):
-			// Kill-and-relaunch toggle: tmux popups can't be resized in place,
-			// so we persist state, ask tmux to queue a new popup at the opposite
-			// size, and exit. See state_restore.go for the mechanism.
-			return m.toggleAndRelaunch()
+			return m.togglePreview()
 
 		case key.Matches(msg, m.keys.Delete):
 			// Delete session if it's a tmux session
