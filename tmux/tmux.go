@@ -29,7 +29,7 @@ type Tmux interface {
 	KillSession(name string) (string, error)
 	StartServer() error
 	IsPaneFloating(pane string) (bool, error)
-	ResizeFloatingPane(pane string, width string, height string) (string, error)
+	ResizeFloatingPane(pane string, width string, height string, x string) (string, error)
 }
 
 type RealTmux struct {
@@ -54,14 +54,19 @@ func (t *RealTmux) IsPaneFloating(pane string) (bool, error) {
 	return strings.TrimSpace(out) == "1", nil
 }
 
-// ResizeFloatingPane resizes a floating pane and re-centres it. Both run in
-// one tmux client call — a bare ";" argument separates tmux commands. NOTE:
-// move-pane with a position flag moves the TARGET (-t); -s makes it error
-// with "pane is not floating" against whatever -t defaulted to.
-func (t *RealTmux) ResizeFloatingPane(pane string, width string, height string) (string, error) {
+// ResizeFloatingPane resizes a floating pane and re-positions it
+// horizontally, keeping its TOP edge fixed — the same top-anchored behavior
+// as the claude-sessions floats, so all the bind floats share one vertical
+// start (-Y 6%). A bare resize keeps pane_left/pane_top, so the width swap
+// needs the explicit -X to stay horizontally centred (45%→X 27%, 80%→X 10%);
+// full re-centring (move-pane -P centre) is deliberately gone — it moved the
+// top and made panels hop. One tmux client call — a bare ";" argument
+// separates tmux commands. NOTE: move-pane's position flags move the TARGET
+// (-t); -s errors with "pane is not floating".
+func (t *RealTmux) ResizeFloatingPane(pane string, width string, height string, x string) (string, error) {
 	return t.shell.Cmd("tmux",
 		"resize-pane", "-t", pane, "-x", width, "-y", height, ";",
-		"move-pane", "-P", "centre", "-t", pane)
+		"move-pane", "-X", x, "-t", pane)
 }
 
 func (t *RealTmux) SwitchClient(targetSession string) (string, error) {

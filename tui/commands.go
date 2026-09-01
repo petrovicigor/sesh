@@ -19,27 +19,33 @@ import (
 )
 
 // Floating-pane geometry for the bind-o float. Height matches the bind's -y;
-// the width swaps on the preview toggle (compact = preview off).
+// the width swaps on the preview toggle (compact = preview off), and each
+// width carries the -X that keeps it horizontally centred — the toggle keeps
+// the TOP edge fixed (bind -Y 6%, shared with the claude-sessions floats)
+// instead of re-centring vertically.
 const (
 	floatCompactWidth = "45%"
+	floatCompactX     = "27%"
 	floatWideWidth    = "80%"
+	floatWideX        = "10%"
 	floatHeight       = "75%"
 )
 
 // resizeOwnFloat resizes sesh's own floating pane to the width matching the
-// preview state and re-centres it. Called synchronously from togglePreview —
-// see the ordering rationale there. On error the pane keeps its old size,
-// which the layout (driven by real WindowSizeMsg values) is still correct for.
+// preview state, horizontally re-centred, top edge fixed. Called
+// synchronously from togglePreview — see the ordering rationale there. On
+// error the pane keeps its old size, which the layout (driven by real
+// WindowSizeMsg values) is still correct for.
 func resizeOwnFloat(t tmux.Tmux, showPreview bool) error {
-	width := floatCompactWidth
+	width, x := floatCompactWidth, floatCompactX
 	if showPreview {
-		width = floatWideWidth
+		width, x = floatWideWidth, floatWideX
 	}
 	pane := os.Getenv("TMUX_PANE")
 	if pane == "" {
 		return nil
 	}
-	_, err := t.ResizeFloatingPane(pane, width, floatHeight)
+	_, err := t.ResizeFloatingPane(pane, width, floatHeight, x)
 	return err
 }
 
