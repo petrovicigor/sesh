@@ -457,3 +457,58 @@ func TestStateDirMigration(t *testing.T) {
 		}
 	})
 }
+
+func TestRecordDepartureNotesClaudeAndKeepsCount(t *testing.T) {
+	r := tempRecent(t)
+	for i := 0; i < 3; i++ {
+		if err := r.RecordSession("foo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := r.GetEntry("foo")
+
+	if err := r.RecordDeparture("foo", "abc", "Fix login"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := r.GetEntry("foo")
+	if !ok {
+		t.Fatal("expected entry for 'foo'")
+	}
+	if got.Count != 3 {
+		t.Errorf("leaving is not a use: count %d, want 3", got.Count)
+	}
+	if !got.Time.After(before.Time) {
+		t.Error("departure must move the time forward")
+	}
+	if got.Claude != "abc" || got.ClaudeTitle != "Fix login" {
+		t.Errorf("claude note = %q/%q", got.Claude, got.ClaudeTitle)
+	}
+
+	// Arriving again keeps the note; leaving from a plain pane clears it.
+	if err := r.RecordSession("foo"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.GetEntry("foo"); got.Claude != "abc" || got.Count != 4 {
+		t.Errorf("arrival must keep the note and count: %+v", got)
+	}
+	if err := r.RecordDeparture("foo", "", "ignored"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.GetEntry("foo"); got.Claude != "" || got.ClaudeTitle != "" {
+		t.Errorf("empty departure must clear the note: %+v", got)
+	}
+}
+
+func TestRecordDepartureCreatesEntry(t *testing.T) {
+	r := tempRecent(t)
+	if err := r.RecordDeparture("reached-elsewhere", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := r.GetEntry("reached-elsewhere")
+	if !ok || got.Count != 1 {
+		t.Fatalf("a session sesh never recorded must get an entry: %+v ok=%v", got, ok)
+	}
+	if _, ok := r.GetAll()["reached-elsewhere"]; !ok {
+		t.Error("GetAll must list it, so sesh last can return to it")
+	}
+}

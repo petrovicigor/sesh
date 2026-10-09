@@ -17,6 +17,12 @@ const (
 type SessionEntry struct {
 	Time  time.Time `json:"t"`
 	Count int       `json:"n"`
+	// Claude is the live Claude Code session in the pane this tmux session
+	// was last left from (empty: none), ClaudeTitle its title for the
+	// message shown when it is gone. Set by RecordDeparture; `sesh last`
+	// returns to it.
+	Claude      string `json:"c,omitempty"`
+	ClaudeTitle string `json:"ct,omitempty"`
 }
 
 type RecentSessions struct {
@@ -78,6 +84,8 @@ func (rs *RecentSessions) UnmarshalJSON(data []byte) error {
 
 type Recent interface {
 	RecordSession(name string) error
+	RecordDeparture(name, claudeID, claudeTitle string) error
+	GetEntry(name string) (SessionEntry, bool)
 	GetTimestamp(name string) (time.Time, bool)
 	GetAll() map[string]time.Time
 	GetFrecencyScores() map[string]float64
@@ -120,7 +128,50 @@ func (r *RealRecent) RecordSession(name string) error {
 		sessions.Sessions[name] = SessionEntry{Time: now, Count: 1}
 	}
 
-	// Prune to keep only the top N sessions by frecency score
+	prune(sessions, now)
+	return r.save(sessions)
+}
+
+// RecordDeparture notes the session being left: its time moves to now — so
+// `sesh last` can return to it however it was reached (a switch sesh never
+// saw) — and the Claude session in the pane it was left from replaces the
+// previous note (empty clears it). The use count is untouched: leaving is
+// not a use.
+func (r *RealRecent) RecordDeparture(name, claudeID, claudeTitle string) error {
+	sessions, err := r.load()
+	if err != nil {
+		sessions = &RecentSessions{Sessions: make(map[string]SessionEntry)}
+	}
+
+	now := time.Now()
+	entry, ok := sessions.Sessions[name]
+	if !ok {
+		entry.Count = 1
+	}
+	entry.Time = now
+	entry.Claude = claudeID
+	entry.ClaudeTitle = claudeTitle
+	if claudeID == "" {
+		entry.ClaudeTitle = ""
+	}
+	sessions.Sessions[name] = entry
+
+	prune(sessions, now)
+	return r.save(sessions)
+}
+
+// GetEntry returns a session's full entry.
+func (r *RealRecent) GetEntry(name string) (SessionEntry, bool) {
+	sessions, err := r.load()
+	if err != nil {
+		return SessionEntry{}, false
+	}
+	entry, ok := sessions.Sessions[name]
+	return entry, ok
+}
+
+// prune keeps only the top maxRecentSessions sessions by frecency score.
+func prune(sessions *RecentSessions, now time.Time) {
 	if len(sessions.Sessions) > maxRecentSessions {
 		type scoredEntry struct {
 			name  string
@@ -142,8 +193,6 @@ func (r *RealRecent) RecordSession(name string) error {
 			delete(sessions.Sessions, entries[i].name)
 		}
 	}
-
-	return r.save(sessions)
 }
 
 // GetTimestamp returns the timestamp for a session if it exists (backward compatible).

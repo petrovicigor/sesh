@@ -31,6 +31,7 @@ func NewConnectCommand(c connector.Connector, i icon.Icon, d dir.Dir) *cobra.Com
 			command, _ := cmd.Flags().GetString("command")
 			tmuxinator, _ := cmd.Flags().GetBool("tmuxinator")
 			root, _ := cmd.Flags().GetBool("root")
+			pane, _ := cmd.Flags().GetString("pane")
 
 			if root {
 				hasRootDir, rootDir := d.RootDir(name)
@@ -39,7 +40,7 @@ func NewConnectCommand(c connector.Connector, i icon.Icon, d dir.Dir) *cobra.Com
 				}
 			}
 
-			opts := model.ConnectOpts{Switch: switchFlag, Command: command, Tmuxinator: tmuxinator}
+			opts := model.ConnectOpts{Switch: switchFlag, Command: command, Tmuxinator: tmuxinator, Pane: pane}
 			trimmedName := i.RemoveIcon(name)
 			if _, err := c.Connect(trimmedName, opts); err != nil {
 				// TODO: add to logging
@@ -55,6 +56,7 @@ func NewConnectCommand(c connector.Connector, i icon.Icon, d dir.Dir) *cobra.Com
 	cmd.Flags().StringP("command", "c", "", "Execute a command when connecting to a new session. Will be ignored if the session exists.")
 	cmd.Flags().BoolP("tmuxinator", "T", false, "Use tmuxinator to start session if it doesnt exist")
 	cmd.Flags().BoolP("root", "r", false, "Switches to the root of the current session")
+	cmd.Flags().StringP("pane", "p", "", "Land on this pane (%N) of the session: its window and pane are selected before the switch")
 
 	return cmd
 }

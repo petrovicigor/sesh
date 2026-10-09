@@ -30,6 +30,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/startup"
 	"github.com/joshmedeski/sesh/v2/tmux"
 	"github.com/joshmedeski/sesh/v2/tmuxinator"
+	"github.com/joshmedeski/sesh/v2/trail"
 	"github.com/joshmedeski/sesh/v2/zoxide"
 )
 
@@ -94,7 +95,13 @@ func NewRootCommand(version string) *cobra.Command {
 	lister := lister.NewLister(config, home, tmux, zoxide, tmuxinator, git, recentTracker, excludesPath)
 	startup := startup.NewStartup(config, lister, tmux, home, replacer)
 	namer := namer.NewNamer(path, git, home, config)
-	connector := connector.NewConnector(config, dir, home, lister, namer, startup, tmux, zoxide, tmuxinator, recentTracker)
+	// Every switch through sesh notes the Claude session it leaves (trail);
+	// `sesh last` returns to it.
+	tr := trail.New(recentTracker, seshHomeDir)
+	connector := trail.Connector{
+		Connector: connector.NewConnector(config, dir, home, lister, namer, startup, tmux, zoxide, tmuxinator, recentTracker),
+		T:         tr,
+	}
 	icon := icon.NewIcon(config)
 	previewer := previewer.NewPreviewer(lister, tmux, icon, dir, home, ls, config, shell)
 	cloner := cloner.NewCloner(connector, git)
@@ -109,7 +116,7 @@ func NewRootCommand(version string) *cobra.Command {
 	// Add subcommands
 	rootCmd.AddCommand(
 		NewListCommand(icon, json, lister),
-		NewLastCommand(lister, tmux, recentTracker, connector),
+		NewLastCommand(lister, tmux, recentTracker, connector, tr),
 		NewConnectCommand(connector, icon, dir),
 		NewCloneCommand(cloner),
 		NewRootSessionCommand(lister, connector, config, home),

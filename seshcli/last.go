@@ -12,6 +12,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/model"
 	"github.com/joshmedeski/sesh/v2/recent"
 	"github.com/joshmedeski/sesh/v2/tmux"
+	"github.com/joshmedeski/sesh/v2/trail"
 )
 
 // isRecreatable checks if a session can be recreated (exists in persistent sources)
@@ -29,7 +30,7 @@ func isRecreatable(l lister.Lister, name string) bool {
 	return false
 }
 
-func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.Connector) *cobra.Command {
+func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.Connector, tr *trail.Trail) *cobra.Command {
 	return &cobra.Command{
 		Use:     "last",
 		Aliases: []string{"L"},
@@ -78,7 +79,13 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 				if entry.name != currentName {
 					// Try direct attach (outside tmux) or switch (inside tmux)
 					var err error
+					after := func() {}
 					if isAttached {
+						// Note the Claude session being left, and line up the
+						// way back into the one noted for the target (its pane
+						// is selected now; an offer or message follows the switch).
+						tr.Depart(entry.name)
+						after = tr.Return(entry.name)
 						_, err = t.SwitchClient(entry.name)
 					} else {
 						_, err = t.AttachSession(entry.name)
@@ -89,6 +96,7 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 						if isAttached {
 							_ = r.RecordSession(entry.name)
 						}
+						after()
 						return nil
 					}
 					// Attach/switch failed - break to fall back to full approach
@@ -132,10 +140,18 @@ func NewLastCommand(l lister.Lister, t tmux.Tmux, r recent.Recent, c connector.C
 			// Use connector - it handles switch/attach and session creation
 			// Only skip recording when NOT in tmux (to avoid feedback loop)
 			// When in tmux, record normally (legitimate session switching)
+			// Inside tmux the way back into the noted Claude session holds here
+			// too — including a session recreated after a kill, whose Claude
+			// session has ended and gets the resume offer.
+			after := func() {}
+			if currentExists {
+				after = tr.Return(targetSession)
+			}
 			_, err := c.Connect(targetSession, model.ConnectOpts{SkipRecent: !currentExists})
 			if err != nil {
 				return fmt.Errorf("failed to connect to last session '%s': %w", targetSession, err)
 			}
+			after()
 			return nil
 		},
 	}
