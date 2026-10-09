@@ -584,7 +584,6 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 		END AS compact_time_ago
 	FROM sessions
 	WHERE tmux_session = ?
-	  AND replaced_by_session_id IS NULL
 	ORDER BY
 		CASE
 			WHEN (ended_at IS NULL) AND (pinned_at IS NOT NULL) THEN 4

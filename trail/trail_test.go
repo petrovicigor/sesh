@@ -28,8 +28,8 @@ func (f *fakeRecent) GetEntry(name string) (recent.SessionEntry, bool) {
 	e, ok := f.entries[name]
 	return e, ok
 }
-func (f *fakeRecent) GetTimestamp(string) (time.Time, bool)  { return time.Time{}, false }
-func (f *fakeRecent) GetAll() map[string]time.Time           { return nil }
+func (f *fakeRecent) GetTimestamp(string) (time.Time, bool) { return time.Time{}, false }
+func (f *fakeRecent) GetAll() map[string]time.Time          { return nil }
 func (f *fakeRecent) GetFrecencyScores() map[string]float64 { return nil }
 
 // fakeTmux answers by the joined argv and logs every call.
@@ -48,7 +48,7 @@ func (f *fakeTmux) run(args ...string) (string, error) {
 }
 
 const (
-	spotCmd  = "display-message -p #{session_name}\t#{pane_id}\t#{pane_floating_flag}"
+	spotCmd  = "display-message -p #{session_name}\t#{session_path}\t#{pane_id}\t#{pane_floating_flag}"
 	panesCmd = "list-panes -F #{pane_id}\t#{pane_last}\t#{pane_floating_flag}"
 )
 
@@ -65,20 +65,21 @@ func newTrail(r *fakeRecent, tm *fakeTmux) *Trail {
 		Lookup:     func(string, string) (claude.Session, bool, error) { return claude.Session{}, false, nil },
 		Offer:      func(string, string) error { return nil },
 		FileExists: func(string) bool { return true },
+		InTmux:     true,
 	}
 }
 
 func TestDepart(t *testing.T) {
 	t.Run("notes the Claude session in the pane being left", func(t *testing.T) {
 		r := &fakeRecent{}
-		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t%1\t0"}}
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
 		newTrail(r, tm).Depart("api")
 		assert.Equal(t, []string{"web|cs-1|Fix login"}, r.departures)
 	})
 
 	t.Run("a plain pane clears the note", func(t *testing.T) {
 		r := &fakeRecent{}
-		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t%9\t0"}}
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%9\t0"}}
 		newTrail(r, tm).Depart("api")
 		assert.Equal(t, []string{"web||"}, r.departures)
 	})
@@ -86,7 +87,7 @@ func TestDepart(t *testing.T) {
 	t.Run("from a float, the pane under it", func(t *testing.T) {
 		r := &fakeRecent{}
 		tm := &fakeTmux{answers: map[string]string{
-			spotCmd:  "web\t%50\t1",
+			spotCmd:  "web\t/repos/web\t%50\t1",
 			panesCmd: "%3\t0\t0\n%1\t1\t0\n%50\t0\t1",
 		}}
 		newTrail(r, tm).Depart("api")
@@ -95,15 +96,37 @@ func TestDepart(t *testing.T) {
 
 	t.Run("a switch within the session records nothing", func(t *testing.T) {
 		r := &fakeRecent{}
-		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t%1\t0"}}
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
 		newTrail(r, tm).Depart("web")
 		assert.Empty(t, r.departures)
 	})
 
-	t.Run("outside tmux records nothing", func(t *testing.T) {
+	t.Run("a path connect that resolves to this session records nothing", func(t *testing.T) {
+		for _, target := range []string{"/repos/web", "/repos/web/", "~/web"} {
+			r := &fakeRecent{}
+			tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
+			tr := newTrail(r, tm)
+			tr.Home = "/repos"
+			tr.Depart(target)
+			assert.Empty(t, r.departures, target)
+		}
+	})
+
+	t.Run("a path to another session still departs", func(t *testing.T) {
 		r := &fakeRecent{}
-		newTrail(r, &fakeTmux{}).Depart("web")
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
+		newTrail(r, tm).Depart("/repos/api")
+		assert.Equal(t, []string{"web|cs-1|Fix login"}, r.departures)
+	})
+
+	t.Run("outside tmux records nothing and asks tmux nothing", func(t *testing.T) {
+		r := &fakeRecent{}
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
+		tr := newTrail(r, tm)
+		tr.InTmux = false
+		tr.Depart("api")
 		assert.Empty(t, r.departures)
+		assert.Empty(t, tm.calls)
 	})
 }
 
@@ -220,7 +243,7 @@ func (s *stubConnector) Connect(name string, opts model.ConnectOpts) (string, er
 func TestConnector(t *testing.T) {
 	t.Run("departs, selects the pane, then connects", func(t *testing.T) {
 		r := &fakeRecent{}
-		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t%1\t0"}}
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
 		inner := &stubConnector{}
 		_, err := Connector{Connector: inner, T: newTrail(r, tm)}.Connect("api", model.ConnectOpts{Pane: "%7"})
 		assert.NoError(t, err)
@@ -231,7 +254,7 @@ func TestConnector(t *testing.T) {
 
 	t.Run("SkipRecent skips the departure", func(t *testing.T) {
 		r := &fakeRecent{}
-		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t%1\t0"}}
+		tm := &fakeTmux{answers: map[string]string{spotCmd: "web\t/repos/web\t%1\t0"}}
 		_, _ = Connector{Connector: &stubConnector{}, T: newTrail(r, tm)}.Connect("api", model.ConnectOpts{SkipRecent: true})
 		assert.Empty(t, r.departures)
 	})

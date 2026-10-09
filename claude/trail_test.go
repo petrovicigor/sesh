@@ -11,11 +11,14 @@ import (
 )
 
 type trailRow struct {
-	id, title, pane, tmuxSession, transcript, replacedBy, lastActivity string
-	ended                                                              bool
-	pid                                                                int
+	id, title, pane, tmuxSession, transcript, lastActivity string
+	ended                                                  bool
+	pid                                                    int
 }
 
+// setupTrailDB builds the columns the current claude-sessions schema has —
+// no legacy replaced_by_session_id, so a query that still names it fails here
+// the way it fails on a fresh machine.
 func setupTrailDB(t *testing.T, rows ...trailRow) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -27,18 +30,15 @@ func setupTrailDB(t *testing.T, rows ...trailRow) string {
 	_, err = db.Exec(`CREATE TABLE sessions (
 		session_id TEXT PRIMARY KEY, custom_title TEXT, tmux_pane TEXT,
 		tmux_session TEXT, transcript_path TEXT, ended_at TEXT,
-		replaced_by_session_id TEXT, pid INTEGER, last_activity TEXT)`)
+		pid INTEGER, last_activity TEXT, started_at TEXT)`)
 	require.NoError(t, err)
 	for _, r := range rows {
-		var ended, replaced any
+		var ended any
 		if r.ended {
 			ended = "2026-10-09T10:00:00Z"
 		}
-		if r.replacedBy != "" {
-			replaced = r.replacedBy
-		}
 		_, err := db.Exec(`INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?)`,
-			r.id, r.title, r.pane, r.tmuxSession, r.transcript, ended, replaced, r.pid, r.lastActivity)
+			r.id, r.title, r.pane, r.tmuxSession, r.transcript, ended, r.pid, r.lastActivity, r.lastActivity)
 		require.NoError(t, err)
 	}
 	return dir
@@ -61,9 +61,8 @@ func TestPaneSession(t *testing.T) {
 		trailRow{id: "stale", title: "Old server", pane: "%5", pid: 11, lastActivity: "2026-10-09T09:00:00Z"},
 		trailRow{id: "live", title: "Fix login", pane: "%5", pid: 22, lastActivity: "2026-10-09T08:00:00Z"},
 		trailRow{id: "ended", title: "Done", pane: "%6", pid: 33, ended: true},
-		trailRow{id: "cleared", title: "Before /clear", pane: "%7", pid: 44, replacedBy: "x"},
 	)
-	stubPIDs(t, 22, 33, 44)
+	stubPIDs(t, 22, 33)
 
 	id, title, ok := PaneSession(home, "%5")
 	assert.True(t, ok)
@@ -72,8 +71,6 @@ func TestPaneSession(t *testing.T) {
 
 	_, _, ok = PaneSession(home, "%6")
 	assert.False(t, ok, "ended session")
-	_, _, ok = PaneSession(home, "%7")
-	assert.False(t, ok, "replaced session")
 	_, _, ok = PaneSession(home, "")
 	assert.False(t, ok)
 	_, _, ok = PaneSession(t.TempDir(), "%5")
@@ -85,11 +82,8 @@ func TestLookup(t *testing.T) {
 		trailRow{id: "a", title: "Live one", pane: "%1", tmuxSession: "dotfiles", pid: 1},
 		trailRow{id: "b", title: "Ended one", pane: "%2", tmuxSession: "web", pid: 2, ended: true},
 		trailRow{id: "c", title: "Crashed", pane: "%3", pid: 99},
-		trailRow{id: "d", title: "Before clear", replacedBy: "e", ended: true},
-		trailRow{id: "e", title: "After clear", pane: "%4", pid: 4},
-		trailRow{id: "f", title: "Replacement gone", replacedBy: "nope", ended: true},
 	)
-	stubPIDs(t, 1, 2, 4)
+	stubPIDs(t, 1, 2)
 
 	s, found, err := Lookup(home, "a")
 	require.NoError(t, err)
@@ -104,15 +98,6 @@ func TestLookup(t *testing.T) {
 
 	s, _, _ = Lookup(home, "c")
 	assert.False(t, s.Live, "a dead process without an end is resumable, not live")
-
-	s, found, _ = Lookup(home, "d")
-	assert.True(t, found)
-	assert.Equal(t, "e", s.ID, "follows /clear replacements")
-	assert.True(t, s.Live)
-
-	s, found, _ = Lookup(home, "f")
-	assert.True(t, found)
-	assert.Equal(t, "f", s.ID, "a vanished replacement falls back to the row itself")
 
 	_, found, err = Lookup(home, "zzz")
 	assert.NoError(t, err)

@@ -51,8 +51,7 @@ func SessionsNeedingAttention(homeDir string) (map[string]bool, error) {
 
 	rows, err := db.Query(`SELECT tmux_session, pid FROM sessions
 		WHERE ended_at IS NULL
-		  AND status LIKE 'awaiting:%'
-		  AND replaced_by_session_id IS NULL`)
+		  AND status LIKE 'awaiting:%'`)
 	if err != nil {
 		return nil, nil
 	}

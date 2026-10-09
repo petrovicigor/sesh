@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/joshmedeski/sesh/v2/claude"
@@ -30,6 +31,10 @@ type Trail struct {
 	// its resume prompt up.
 	Offer      func(id, session string) error
 	FileExists func(path string) bool
+	// InTmux: sesh runs inside tmux ($TMUX). Outside it there is no client
+	// to leave from, and a bare display-message would name some unrelated
+	// session.
+	InTmux bool
 }
 
 func New(r recent.Recent, home string) *Trail {
@@ -49,37 +54,57 @@ func New(r recent.Recent, home string) *Trail {
 			_, err := os.Stat(path)
 			return err == nil
 		},
+		InTmux: os.Getenv("TMUX") != "",
 	}
 }
 
-// spot is the session the client is in and the pane it is looking at. A
-// float (sesh's own, the claude-sessions picker) is not where you were: its
-// window's last tiled pane is — a modal float is always the active pane, so
-// the pane it covers carries pane_last.
-func (t *Trail) spot() (session, pane string) {
-	out, err := t.Tmux("display-message", "-p", "#{session_name}\t#{pane_id}\t#{pane_floating_flag}")
+// spot is the session the client is in, its path, and the pane it is looking
+// at. A float (sesh's own, the claude-sessions picker) is not where you were:
+// its window's last tiled pane is — a modal float is always the active pane,
+// so the pane it covers carries pane_last.
+func (t *Trail) spot() (session, path, pane string) {
+	if !t.InTmux {
+		return "", "", ""
+	}
+	out, err := t.Tmux("display-message", "-p", "#{session_name}\t#{session_path}\t#{pane_id}\t#{pane_floating_flag}")
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	parts := strings.Split(out, "\t")
-	if len(parts) != 3 {
-		return "", ""
+	if len(parts) != 4 {
+		return "", "", ""
 	}
-	session, pane = parts[0], parts[1]
-	if parts[2] != "1" {
-		return session, pane
+	session, path, pane = parts[0], parts[1], parts[2]
+	if parts[3] != "1" {
+		return session, path, pane
 	}
 	out, err = t.Tmux("list-panes", "-F", "#{pane_id}\t#{pane_last}\t#{pane_floating_flag}")
 	if err != nil {
-		return session, ""
+		return session, path, ""
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
 		if len(f) == 3 && f[1] == "1" && f[2] == "0" {
-			return session, f[0]
+			return session, path, f[0]
 		}
 	}
-	return session, ""
+	return session, path, ""
+}
+
+// sameTarget reports whether a connect target names the session the client
+// is in: by name, or by the path sesh would resolve to it (a path connect —
+// the claude-sessions resume, a dir pick in the tui).
+func sameTarget(target, session, path, home string) bool {
+	if target == session {
+		return true
+	}
+	if path == "" || !strings.ContainsRune(target, '/') {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(target, "~/"); ok && home != "" {
+		target = filepath.Join(home, rest)
+	}
+	return filepath.Clean(target) == filepath.Clean(path)
 }
 
 // Depart notes where the client is leaving from before a switch to target:
@@ -87,8 +112,8 @@ func (t *Trail) spot() (session, pane string) {
 // Claude session in the pane you were looking at (none clears the note). A
 // switch within the session records nothing.
 func (t *Trail) Depart(target string) {
-	session, pane := t.spot()
-	if session == "" || session == target {
+	session, path, pane := t.spot()
+	if session == "" || sameTarget(target, session, path, t.Home) {
 		return
 	}
 	id, title, _ := t.PaneSession(t.Home, pane)
