@@ -25,7 +25,9 @@ var (
 	treeMidStr       = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("│")
 	treeEndStr       = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("└")
 	bareRootStr      = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("(bare root)")
-	attentionIconStr = lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Render("✋") + " "
+	// Copper ◆ matches the miasma awaiting indicator (#b36d43) used in
+	// claude-sessions tmux window status and picker.
+	attentionIconStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#b36d43")).Render("◆") + " "
 
 	// Pre-rendered source badges for filtered view (avoids per-item lipgloss.Render)
 	sourceBadges = map[string]string{
@@ -71,6 +73,7 @@ type compactDelegate struct {
 	worktreeDefaults *map[string]string
 	claudeAttention  *map[string]bool
 	savedState       *map[string]bool
+	gitChanges       *map[string]gitChanges // path -> working-tree change counts (tmux rows)
 }
 
 
@@ -145,7 +148,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		// Override tmux icon with attention indicator if CC session is awaiting
 		if v.session.Src == "tmux" && d.claudeAttention != nil {
 			if (*d.claudeAttention)[v.session.Name] {
-				// Replace icon prefix: swap blue  with magenta 🖐️
+				// Replace icon prefix: swap blue  with copper ◆ (miasma awaiting).
 				if v.iconPrefix != "" {
 					str = attentionIconStr + strings.TrimPrefix(str, v.iconPrefix)
 				}
@@ -196,6 +199,15 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 				// Active tmux: keep full name but add star
 				namePart := strings.TrimPrefix(str, v.iconPrefix)
 				str = v.iconPrefix + defaultStarStr + " " + namePart
+			}
+		}
+
+		// Append git working-tree change counts for tmux-backed rows (one-shot
+		// check at open; the map is empty until GitChangesMsg lands). After
+		// the expandedGroup/bareRoot rewrites above so the badge survives them.
+		if d.gitChanges != nil && v.session.Src == "tmux" {
+			if b := (*d.gitChanges)[v.session.Path].badge(); b != "" {
+				str += " " + b
 			}
 		}
 

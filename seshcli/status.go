@@ -14,7 +14,7 @@ func NewStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show attention indicator for other tmux sessions",
-		Long:  "Outputs 🖐️ if any Claude Code session in another tmux session needs user confirmation. Uses tmux @claude_icon for fast detection, validated by DB + process liveness check.",
+		Long:  "Outputs a copper ◆ if any Claude Code session in another tmux session needs user confirmation. Uses tmux @claude_icon (b36d43 marker) for fast detection, validated by DB + process liveness check.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Get current tmux session name
 			out, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
@@ -28,12 +28,13 @@ func NewStatusCommand() *cobra.Command {
 
 			// Fast path: read @claude_icon from tmux windows.
 			// claude-sessions hooks set this instantly on PermissionRequest.
+			// The awaiting marker is "#[fg=#b36d43]◆" — matched by the copper hex.
 			out, err = exec.Command("tmux", "list-windows", "-a", "-F", "#{session_name}\t#{@claude_icon}").Output()
 			if err != nil {
 				return nil
 			}
 
-			// Collect sessions that have 🖐️ on any window (excluding current)
+			// Collect sessions with the awaiting marker on any window (excluding current)
 			candidates := make(map[string]bool)
 			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 				parts := strings.SplitN(line, "\t", 2)
@@ -41,12 +42,12 @@ func NewStatusCommand() *cobra.Command {
 					continue
 				}
 				sessionName, icon := parts[0], parts[1]
-				if sessionName != currentSession && strings.Contains(icon, "🖐") {
+				if sessionName != currentSession && strings.Contains(icon, "b36d43") {
 					candidates[sessionName] = true
 				}
 			}
 			if len(candidates) == 0 {
-				return nil // Common case: no 🖐️ icons anywhere
+				return nil // Common case: no awaiting icons anywhere
 			}
 
 			// Validate: cross-check with DB + process liveness.
@@ -59,7 +60,7 @@ func NewStatusCommand() *cobra.Command {
 			verified, _ := claude.SessionsNeedingAttention(homeDir)
 			for session := range candidates {
 				if verified[session] {
-					fmt.Print("🖐️")
+					fmt.Print("#[fg=#b36d43]◆#[default]")
 					return nil
 				}
 			}

@@ -65,6 +65,8 @@ const (
 	colorGreenDim   = "\033[2;32m"
 	colorYellowDim  = "\033[2;33m"
 	colorMagentaDim = "\033[2;35m"
+	// Copper (#b36d43) — matches miasma FG_PREFIX used for awaiting-permission state.
+	colorCopper = "\033[38;2;179;109;67m"
 )
 
 // gitData holds results from git commands for a regular git repo.
@@ -623,7 +625,7 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 		sessionLine := formatClaudeSession(
 			title, endedAt.Valid, pid.Int64, status.String, timeAgo, createdAgo,
 			compactedAt.Valid, int(compactionCount.Int64), compactTimeAgo,
-			gitBranch.String, pinnedAt.Valid, isActive,
+			gitBranch.String, pinnedAt.Valid,
 		)
 		output.WriteString(sessionLine + "\n")
 	}
@@ -633,7 +635,7 @@ func getClaudeSessions(projectPath string, tmuxSession string, isActive bool) st
 
 func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 	timeAgo string, createdAgo string, hasCompacted bool, compactionCount int,
-	compactTimeAgo string, gitBranch string, isPinned bool, isActiveSession bool) string {
+	compactTimeAgo string, gitBranch string, isPinned bool) string {
 
 	if title == "" {
 		title = "Untitled"
@@ -651,38 +653,20 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		}
 	}
 
-	// Status icons and display — match miasma icons used in claude-sessions picker.
+	// Status icon — mirrors claude-sessions picker (internal/ui/item.go statusIcon).
+	// Granular state is conveyed by color/shape alone (miasma indicators); no emoji.
 	var statusIcon string
-	if status == "failed" {
+	switch {
+	case status == "failed" || status == "crashed":
 		statusIcon = colorRed + "✗" + colorReset
-	} else if status == "starting" {
+	case status == "starting":
 		statusIcon = colorYellow + "◈" + colorReset
-	} else if isActive {
+	case isActive && strings.HasPrefix(status, "awaiting:"):
+		statusIcon = colorCopper + "◆" + colorReset
+	case isActive:
 		statusIcon = colorGreen + "◆" + colorReset
-	} else {
+	default:
 		statusIcon = colorGray + "◇" + colorReset
-	}
-
-	// Status display
-	statusDisplay := ""
-	if isActive && status != "idle" && status != "" {
-		parts := strings.Split(status, ":")
-		statusType := parts[0]
-
-		yellow := colorYellow
-		magenta := colorMagenta
-		if !isActiveSession {
-			yellow = colorYellowDim
-			magenta = colorMagentaDim
-		}
-
-		if status == "thinking" {
-			statusDisplay = fmt.Sprintf("%s🔮%s ", yellow, colorReset)
-		} else if statusType == "running" {
-			statusDisplay = fmt.Sprintf("%s🔧%s ", yellow, colorReset)
-		} else if statusType == "awaiting" {
-			statusDisplay = fmt.Sprintf("%s🖐️%s ", magenta, colorReset)
-		}
 	}
 
 	// Title color
@@ -732,7 +716,7 @@ func formatClaudeSession(title string, hasEnded bool, pid int64, status string,
 		timeAgo = "1m"
 	}
 
-	return fmt.Sprintf(" %s %s%s%s%s%s%s %s%s%s%s%s%s",
-		statusIcon, statusDisplay, pinIndicator, titleColor, title, colorReset, branchDisplay,
+	return fmt.Sprintf(" %s %s%s%s%s%s %s%s%s%s%s%s",
+		statusIcon, pinIndicator, titleColor, title, colorReset, branchDisplay,
 		colorDim, timeAgo, colorReset, ageDisplay, compactDisplay, staleDisplay)
 }
