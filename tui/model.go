@@ -354,6 +354,17 @@ func (m Model) Init() tea.Cmd {
 
 	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState(), func() tea.Msg { return enterFilterMsg{} }}
 
+	// One-shot git working-tree counts for tmux-backed rows (the badge).
+	var tmuxPaths []string
+	for _, key := range m.sessions.OrderedIndex {
+		if s := m.sessions.Directory[key]; s.Src == "tmux" && s.Path != "" {
+			tmuxPaths = append(tmuxPaths, s.Path)
+		}
+	}
+	if len(tmuxPaths) > 0 {
+		cmds = append(cmds, checkGitChanges(tmuxPaths))
+	}
+
 	// Load preview for first item if available
 	if m.list.SelectedItem() != nil && m.showPreview {
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {

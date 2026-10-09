@@ -645,6 +645,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case GitChangesMsg:
+		// Same in-place refill as SavedStateMsg: the delegate holds the pointer.
+		for k := range *m.gitChanges {
+			delete(*m.gitChanges, k)
+		}
+		for k, v := range msg.Changes {
+			(*m.gitChanges)[k] = v
+		}
+		return m, nil
+
 	case SessionKilledMsg:
 		// Reload even on error: kill-session commonly returns exit 1 when the
 		// session was already destroyed by GracefulPaneCleanup's SIGTERM to

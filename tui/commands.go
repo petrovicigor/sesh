@@ -21,7 +21,7 @@ import (
 // Floating-pane geometry for the bind-o float. Height matches the bind's -y;
 // the width swaps on the preview toggle (compact = preview off), and each
 // width carries the -X that keeps it horizontally centred — the toggle keeps
-// the TOP edge fixed (bind -Y 6%, shared with the claude-sessions floats)
+// the TOP edge fixed (bind -Y 13%, shared with the claude-sessions picker)
 // instead of re-centring vertically.
 const (
 	floatCompactWidth = "45%"
@@ -300,6 +300,14 @@ func checkSavedState() tea.Cmd {
 			sessions[strings.TrimSuffix(name, ".json")] = true
 		}
 		return SavedStateMsg{Sessions: sessions}
+	}
+}
+
+// checkGitChanges runs the one-shot working-tree check for tmux-backed rows
+// off the UI loop and delivers the counts as a GitChangesMsg.
+func checkGitChanges(paths []string) tea.Cmd {
+	return func() tea.Msg {
+		return GitChangesMsg{Changes: gitChangesForPaths(paths)}
 	}
 }
 
