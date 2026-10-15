@@ -74,6 +74,28 @@ type compactDelegate struct {
 	claudeAttention  *map[string]bool
 	savedState       *map[string]bool
 	gitChanges       *map[string]gitChanges // path -> working-tree change counts (tmux rows)
+	laneOwners       *map[string]string     // lane path -> owner label (claude-sessions lanes)
+}
+
+// laneOwnerSuffix renders a lane's owner label dim after the row name: two
+// spaces, then the label, cut with "…" to the budget (cells available for the
+// whole suffix, gap included). A budget too tight for the gap plus at least one
+// cell of label yields "" — the label is the first thing a narrow row gives up.
+// Raw ANSI, like the ⟲ marker: lipgloss Render nests badly inside
+// selectedItemStyle in bubbletea v2. Gray 245 matches ⟲ and the git badge.
+func laneOwnerSuffix(label string, budget int) string {
+	const gap = 2
+	avail := budget - gap
+	if label == "" || avail < 1 {
+		return ""
+	}
+	if ansi.StringWidth(label) > avail {
+		if avail < 2 { // no room for a char plus the ellipsis
+			return ""
+		}
+		label = ansi.Truncate(label, avail, "…")
+	}
+	return strings.Repeat(" ", gap) + "\033[38;5;245m" + label + "\033[0m"
 }
 
 
@@ -205,11 +227,45 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		// Append git working-tree change counts for tmux-backed rows (one-shot
 		// check at open; the map is empty until GitChangesMsg lands). After
 		// the expandedGroup/bareRoot rewrites above so the badge survives them.
+		var gitBadge string
 		if d.gitChanges != nil && v.session.Src == "tmux" {
 			if b := (*d.gitChanges)[v.session.Path].badge(); b != "" {
-				str += " " + b
+				gitBadge = " " + b
 			}
 		}
+
+		// Source badge shown during active filtering (right-aligned below).
+		showSourceBadge := isFiltered && len(matchedRunes) > 0
+		var badge string
+		var badgeWidth int
+		if showSourceBadge {
+			badge = sourceBadges[v.session.Src]
+			if badge == "" {
+				badge = badgeStyle.Render(v.session.Src) // fallback for unknown sources
+			}
+			badgeWidth = lipgloss.Width(badge)
+		}
+
+		// A lane's owner (claude-sessions) dim right after the name. The budget
+		// is whatever the row has left once everything that follows it (git
+		// badge, group badge, node marker, filter-mode source badge) and what
+		// precedes it (cursor, tree connector) are counted, so a narrow row
+		// shortens the label before it costs any of those.
+		if d.laneOwners != nil && v.session.Path != "" {
+			if label, ok := (*d.laneOwners)[v.session.Path]; ok {
+				budget := m.Width() - 2 - lipgloss.Width(str) -
+					lipgloss.Width(gitBadge) - lipgloss.Width(v.groupBadge) - lipgloss.Width(nodeIndicator)
+				if v.groupChild {
+					budget -= 2 // "│ " / "└ " connector
+				}
+				if showSourceBadge {
+					budget -= badgeWidth + 1
+				}
+				str += laneOwnerSuffix(label, budget)
+			}
+		}
+
+		str += gitBadge
 
 		// Append dormant badge inline if this is the last active tmux in a group
 		if v.groupBadge != "" {
@@ -217,12 +273,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		}
 
 		// Show source badge during active filtering, truncating long names to fit
-		if isFiltered && len(matchedRunes) > 0 {
-			badge := sourceBadges[v.session.Src]
-			if badge == "" {
-				badge = badgeStyle.Render(v.session.Src) // fallback for unknown sources
-			}
-			badgeWidth := lipgloss.Width(badge)
+		if showSourceBadge {
 			prefixWidth := 2 // "❯ " or "  "
 			maxNameWidth := m.Width() - prefixWidth - badgeWidth - 1
 			nameWidth := lipgloss.Width(str)

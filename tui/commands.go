@@ -311,6 +311,25 @@ func checkGitChanges(paths []string) tea.Cmd {
 	}
 }
 
+// loadLaneOwners reads who holds each claude-sessions lane (lane path -> owner
+// label) from ~/.claude/sessions.db, read-only. One small SELECT; a missing
+// database or lanes table, or any failure, is an empty map — never an error.
+func loadLaneOwners() map[string]string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return map[string]string{}
+	}
+	return claude.LaneOwners(homeDir)
+}
+
+// checkLaneOwners loads the lane owners off the UI loop and delivers them as
+// a LaneOwnersMsg.
+func checkLaneOwners() tea.Cmd {
+	return func() tea.Msg {
+		return LaneOwnersMsg{Owners: loadLaneOwners()}
+	}
+}
+
 // killSessionWithCleanup gracefully cleans up panes, kills the session, then cleans up orphans.
 // Runs entirely async so the TUI stays responsive.
 func killSessionWithCleanup(t tmux.Tmux, sessionName string) tea.Cmd {

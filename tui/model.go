@@ -177,6 +177,7 @@ type Model struct {
 	claudeAttention   *map[string]bool         // shared with delegate: tmux session name -> needs attention
 	savedState        *map[string]bool         // shared with delegate: session name -> has saved state
 	gitChanges        *map[string]gitChanges   // shared with delegate: path -> working-tree change counts
+	laneOwners        *map[string]string       // shared with delegate: claude-sessions lane path -> owner label
 	pendingDeleteFilterText  string // filter text to restore after async session kill
 	pendingDeleteCursorIndex int    // cursor index to restore after async session kill
 	showPreview            bool   // true when preview pane is visible (toggled with ctrl+p)
@@ -264,7 +265,8 @@ func newModel(
 		claudeAttention:  &map[string]bool{},
 		savedState:       &map[string]bool{},
 		gitChanges:       &map[string]gitChanges{},
-		allItems:         items,
+		laneOwners:       &map[string]string{},
+		allItems:        items,
 		worktreeGroups:   worktreeGroups,
 		expandedGroup:    new(string),
 		worktreeDefaults: &worktreeDefaults,
@@ -281,7 +283,7 @@ func newModel(
 	// Start with reasonable defaults, will be resized on WindowSizeMsg
 	listWidth := 60
 	previewWidth := 100
-	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState, gitChanges: m.gitChanges}
+	delegate := compactDelegate{processInfo: m.processInfo, expandedGroup: m.expandedGroup, worktreeDefaults: m.worktreeDefaults, claudeAttention: m.claudeAttention, savedState: m.savedState, gitChanges: m.gitChanges, laneOwners: m.laneOwners}
 	l := list.New(displayItems, delegate, listWidth, 24)
 	l.Title = "⚡ Sesh Sessions" // Set initial title
 	l.SetShowStatusBar(false)  // Hide item count
@@ -352,7 +354,7 @@ func (m Model) Init() tea.Cmd {
 		return tea.RequestBackgroundColor()
 	}
 
-	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState(), func() tea.Msg { return enterFilterMsg{} }}
+	cmds := []tea.Cmd{bgColorCmd, checkClaudeAttention(), scheduleClaudeAttentionTick(), checkSavedState(), checkLaneOwners(), func() tea.Msg { return enterFilterMsg{} }}
 
 	// One-shot git working-tree counts for tmux-backed rows (the badge).
 	var tmuxPaths []string

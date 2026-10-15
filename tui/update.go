@@ -562,7 +562,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					previewCmd = loadPreview(context.Background(), m.previewer,item.session)
 				}
 			}
-			return m, previewCmd
+			// Lane owners ride every list refresh (one small read, off the UI loop).
+			return m, tea.Batch(previewCmd, checkLaneOwners())
 		}
 
 		// NOT preserving - normal reload behavior
@@ -590,7 +591,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return enterFilterMsg{}
 		}
 
-		return m, tea.Batch(previewCmd, filterCmd)
+		return m, tea.Batch(previewCmd, filterCmd, checkLaneOwners())
 
 	case PreviewLoadedMsg:
 		if !m.showPreview {
@@ -652,6 +653,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for k, v := range msg.Changes {
 			(*m.gitChanges)[k] = v
+		}
+		return m, nil
+
+	case LaneOwnersMsg:
+		// Same in-place refill as GitChangesMsg: the delegate holds the pointer.
+		for k := range *m.laneOwners {
+			delete(*m.laneOwners, k)
+		}
+		for k, v := range msg.Owners {
+			(*m.laneOwners)[k] = v
 		}
 		return m, nil
 

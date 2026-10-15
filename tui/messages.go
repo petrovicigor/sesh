@@ -45,6 +45,12 @@ type GitChangesMsg struct {
 	Changes map[string]gitChanges // absolute directory path -> change counts
 }
 
+// LaneOwnersMsg delivers who holds each claude-sessions lane, loaded once per
+// list refresh so row rendering never touches the database.
+type LaneOwnersMsg struct {
+	Owners map[string]string // lane worktree path -> owner label
+}
+
 // SessionKilledMsg is sent after a tmux session has been killed (with process cleanup).
 type SessionKilledMsg struct {
 	Err error
